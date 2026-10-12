@@ -1,23 +1,15 @@
 {
-  "name": "mattpocock",
+  "name": "yu",
   "owner": {
-    "name": "Matt Pocock",
-    "url": "https://www.aihero.dev"
+    "name": "Hunghsuanyu"
   },
-  "description": "Matt Pocock's skills for real engineering, as an installable Claude Code plugin.",
+  "description": "Personal plugin marketplace (fork of an upstream skills repo).",
   "plugins": [
     {
-      "name": "mattpocock-skills",
-      "source": "./",
-      "description": "Matt Pocock's agent skills for real engineering (grilling, spec/ticket flows, TDD, code review, domain modelling and more).",
-      "category": "engineering",
-      "keywords": [
-        "engineering",
-        "skills",
-        "tdd",
-        "code-review",
-        "grilling"
-      ]
+      "name": "yu-github-workflow",
+      "source": "./plugins/yu-github-workflow",
+      "description": "GitHub issue workflow helpers: a smoke-test skill and a reminder hook before creating issues.",
+      "category": "engineering"
     }
   ]
 }
