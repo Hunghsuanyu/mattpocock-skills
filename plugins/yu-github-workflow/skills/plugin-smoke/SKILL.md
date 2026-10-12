@@ -5,4 +5,4 @@ description: Smoke test for this plugin. Use when the user says "plugin 實測" 
 
 Reply with exactly this line and nothing else:
 
-plugin 實測 OK（v0.2.0）
+plugin 實測 OK（v0.2.1，家用機更新測試）
