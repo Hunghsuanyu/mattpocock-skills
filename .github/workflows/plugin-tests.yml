@@ -1,0 +1,38 @@
+name: plugin-tests
+
+# Runs the yu-github-workflow plugin's own tests. Every test swaps gh for a
+# fake program on PATH, so nothing here touches a real repo or needs a token.
+
+on:
+  push:
+    paths:
+      - "plugins/yu-github-workflow/**"
+      - ".github/workflows/plugin-tests.yml"
+  pull_request:
+    paths:
+      - "plugins/yu-github-workflow/**"
+      - ".github/workflows/plugin-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.event_name != 'push' || !github.event.deleted
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Run every tests/test-*.sh
+        run: |
+          set -uo pipefail
+          rc=0
+          for t in plugins/yu-github-workflow/tests/test-*.sh; do
+            echo "::group::$t"
+            bash "$t" || { echo "::error file=$t::exit $?"; rc=1; }
+            echo "::endgroup::"
+          done
+          exit "$rc"
