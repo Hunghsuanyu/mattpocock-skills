@@ -1,5 +1,5 @@
 {
   "name": "yu-github-workflow",
   "version": "0.2.1",
-  "description": "GitHub issue workflow helpers: an entry skill that routes to the right workflow skill, and a reminder hook before creating issues."
+  "description": "GitHub issue workflow helpers: an entry skill that routes to the right workflow skill, and hooks around creating issues and pull requests (reminders before, self-checks after)."
 }
