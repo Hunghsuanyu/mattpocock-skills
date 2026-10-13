@@ -58,16 +58,17 @@ jobs:
 
       - name: Scan PR title and body
         if: github.event_name == 'pull_request'
+        # Title and body are read from the event file, not passed through env:
+        # step env values are printed in the public log.
         env:
           LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -uo pipefail
-          rc=0
-          printf '%s\n' "$PR_TITLE" | bash .github/scripts/leak-scan.sh text pr-title || rc=$?
+          jq -r '.pull_request.title // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-title" || { echo "cannot read PR title"; exit 2; }
+          jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body" || { echo "cannot read PR body"; exit 2; }
+          rc=0; r2=0
+          bash .github/scripts/leak-scan.sh text pr-title < "$RUNNER_TEMP/pr-title" || rc=$?
           [ "$rc" -le 1 ] || exit "$rc"
-          r2=0
-          printf '%s\n' "$PR_BODY" | bash .github/scripts/leak-scan.sh text pr-body || r2=$?
+          bash .github/scripts/leak-scan.sh text pr-body < "$RUNNER_TEMP/pr-body" || r2=$?
           [ "$r2" -le 1 ] || exit "$r2"
           exit $(( rc > r2 ? rc : r2 ))
