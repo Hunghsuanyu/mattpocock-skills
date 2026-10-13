@@ -3,7 +3,7 @@
 # 絕不呼叫真的 gh pr create。私有擴充換成暫存目錄裡固定回 0／1 的 pr-scan.sh。
 # 每個案例自己設或清空 GITHUB_WORKFLOW_PRIVATE_DIR，不吃跑測試那台的設定。
 # 每個案例印一行「ok <案例名>」或「not ok <案例名>」。
-# 裸的「井號＋數字」在執行時組出，不直接寫進本檔。
+# 票號（井號＋數字）在執行時組出，不直接寫進本檔。
 set -uo pipefail
 TPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 9
 PLUGIN="$(cd "${TPO_DIR}/.." && pwd -P)" || exit 9
@@ -48,6 +48,8 @@ export PATH="${T}/bin:${PATH}" FAKE_LOG="${T}/log" FAKE_STATE="${T}/state"
 printf '%s\n' '改寫說明' > "${T}/title"
 printf '%s\n' '## 摘要' '改了說明文字' > "${T}/clean"
 printf '## 摘要\n改了說明文字\nCloses %s%s\n' '#' 5 > "${T}/bare"
+printf '## 摘要\nCloses some-owner/some-repo%s%s\n' '#' 5 > "${T}/ownerrepo"
+printf '## 摘要\n見 app%s%s 的說明\n' '#' 12 > "${T}/short"
 
 PASS=0 FAILN=0
 calls() { grep -c "^$1" "${FAKE_LOG}"; } # 某種 gh 呼叫的次數
@@ -88,6 +90,12 @@ verdict '讀回後掃描 rc=1：rc 非 0' c_view_dirty
 run PUBLIC ok '' "${T}/bare"
 c_builtin() { [ "${rc}" -eq 1 ] && [ "$(calls 'pr create')" -eq 0 ] && grep -q '內建檢查' "${T}/err"; }
 verdict '沒有私有擴充：內建檢查擋裸票號、沒呼叫 gh pr create' c_builtin
+
+run PUBLIC ok '' "${T}/ownerrepo"
+verdict '沒有私有擴充：內建檢查擋 owner/repo#N、沒呼叫 gh pr create' c_builtin
+
+run PUBLIC ok '' "${T}/short"
+verdict '沒有私有擴充：內建檢查擋短名#N、沒呼叫 gh pr create' c_builtin
 
 run PUBLIC ok '' "${T}/clean"
 c_clean() { [ "${rc}" -eq 0 ] && [ "$(calls 'pr create')" -eq 1 ] && [ "$(calls 'pr view')" -eq 1 ] && [ "${out}" = "${URL}" ]; }
