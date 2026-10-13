@@ -8,7 +8,7 @@
     {
       "name": "yu-github-workflow",
       "source": "./plugins/yu-github-workflow",
-      "description": "GitHub issue workflow helpers: a smoke-test skill and a reminder hook before creating issues.",
+      "description": "GitHub issue workflow helpers: an entry skill that routes to the right workflow skill, and hooks around creating issues and pull requests (reminders before, self-checks after).",
       "category": "engineering"
     }
   ]
