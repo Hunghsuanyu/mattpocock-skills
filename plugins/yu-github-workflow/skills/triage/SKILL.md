@@ -47,7 +47,7 @@ disable-model-invocation: true
 6. **結果**：
    - 不做 → 寫進 SPEC 的「刻意不做的事」再關（SPEC 內文由指揮台改，分流者在 SPEC 留言請它寫入）。
    - 已經做好 → 指出位置。
-   - 關票原因用 GitHub 原生的，不用標籤：重複 `gh issue close <票號> --duplicate-of <原票>`；不處理、不成立 `gh issue close <票號> --reason "not planned"`；資訊不足 → 留言 @對方、不關票。
+   - 關票原因用 GitHub 原生的，不用標籤；重複、不處理、資訊不足各怎麼做，照 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 第四節「關票原因：不用標籤」。
    - 以上關票只用在我方的票；別人的票關不關由開票人決定，我方只留言說明。
 
 ### 補資訊的固定格式
