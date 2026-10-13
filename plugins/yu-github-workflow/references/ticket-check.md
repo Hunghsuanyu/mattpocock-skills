@@ -9,6 +9,7 @@ scripts/ticket-check.sh <owner/repo> [<owner/repo> ...]
 - 只讀：只呼叫 GitHub 的讀取 API，不改任何票、標籤或設定。
 - 退出碼：`0` 全過；`1` 有 NG；`2` 參數用錯。
 - 測試：`tests/test-ticket-check.sh`（只對假 gh 跑）。
+- 用 `gh issue create` 開完票，PostToolUse hook（`scripts/hook-post-bash.sh`）會對輸出裡剛開好的票網址所在的 repo 自動跑一次，NG 放進對話；輸出裡沒有票網址就不跑，並明講沒跑。
 
 ## 三態
 

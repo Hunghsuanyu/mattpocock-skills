@@ -1,0 +1,2 @@
+s/issue\[\[:space:]]+create/issue[[:space:]]+crate/	scripts/lib/hook-common.sh
+# 第一行：把「gh issue create」的比對改錯一字（test-hooks.sh 的開票命中與開票自檢案例必須紅）。只跑第一行。第一欄是 sed 指令、第二欄是被突變的檔（相對 plugin 根目錄），以 TAB 分隔。
