@@ -1,1 +1,1 @@
-s/elif is_blocked "\$b" "\$a"/elif false/
+s/if is_blocked "\$a" "\$b"; then/if false; then/
