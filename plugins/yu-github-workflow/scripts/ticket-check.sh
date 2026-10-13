@@ -228,19 +228,23 @@ demo_problem() {
     }'
 }
 
+# ⚠️ 本檔裡「printf 大字串 | awk」的 awk 一律讀完輸入、不用 exit 提早離開：
+#   awk 先離開會讓上游 printf 吃 SIGPIPE，在 pipefail＋set -e 下整支靜靜死在半路（票多、內文大時才發生）。
+
 # ── repo 設定（docs/agents/github.md） ─────────────────────────────
 # stdin＝設定檔全文；印「## 機器讀的欄位」標題下第一個 text 區塊的內容。
 cfg_block() {
   awk '
+    stop { next }
     /^## 機器讀的欄位[[:space:]]*$/ { sec = 1; next }
-    sec && !inb && /^## / { exit }
+    sec && !inb && /^## / { stop = 1; next }
     sec && !inb && /^```text[[:space:]]*$/ { inb = 1; next }
-    inb && /^```/ { exit }
+    inb && /^```/ { stop = 1; next }
     inb { print }'
 }
 # 參數：區塊內容、欄位名。印值（欄位名後接半形冒號與一個空格，逐字比對）；沒有這個欄位印空。
 cfg_get() {
-  printf '%s\n' "$1" | awk -v k="$2: " 'index($0, k) == 1 { print substr($0, length(k) + 1); exit }'
+  printf '%s\n' "$1" | awk -v k="$2: " '!d && index($0, k) == 1 { print substr($0, length(k) + 1); d = 1 }'
 }
 
 # 一個 repo 一次 GraphQL：每張開著的票 `<票號>\t<Status｜（未設）｜NONE>`（NONE＝不在那個 Project）。
@@ -259,7 +263,7 @@ project_status_rows() {
 }
 ticket_pstatus() {  # ok（1＝問得到）、project_status_rows 的輸出、票號
   [ "$1" = 1 ] || { printf '?'; return 0; }
-  local s; s=$(printf '%s\n' "$2" | awk -F'\t' -v n="$3" '$1==n{print $2; exit}')
+  local s; s=$(printf '%s\n' "$2" | awk -F'\t' -v n="$3" '!d && $1==n{print $2; d=1}')
   printf '%s' "${s:-NONE}"
 }
 
@@ -401,7 +405,7 @@ for repo in "$@"; do
       [ "$state" = open ] && [ "$mode" = project ] && ps=$(ticket_pstatus "$ps_ok" "$pstat" "$n")
       probs=$(label_problems "$state" "$rtitle" "$labels" "$ps" "$mode" "$machines")
       if [ "$par_ok" = 1 ] && [ "$state" = open ]; then
-        ptitle=$(printf '%s\n' "$parents" | awk -F'\t' -v n="$n" '$1==n{print $2; exit}')
+        ptitle=$(printf '%s\n' "$parents" | awk -F'\t' -v n="$n" '!d && $1==n{print $2; d=1}')
         p6=$(derive_problems "$ptitle" "$labels")
         if [ -n "$p6" ]; then [ -z "$probs" ] || probs="$probs"$'\n'; probs="$probs$p6"; fi
       fi
@@ -423,7 +427,7 @@ for repo in "$@"; do
         esac
         # 格 7：原生與整合 PR 兩個來源取聯集；都沒有 ⇒ 不判。
         if [ "$cl_ok" = 1 ]; then
-          crow=$(printf '%s\n' "$closers" | awk -F'\t' -v n="$n" '$1==n{print; exit}')
+          crow=$(printf '%s\n' "$closers" | awk -F'\t' -v n="$n" '!d && $1==n{print; d=1}')
           prs=$( { printf '%s\n' "$crow" | cut -f2 | tr ',' '\n'
                    printf '%s' "$prrefs" | awk -F'\t' -v n="$n" '$1==n{print $2}'; } | awk 'NF && !s[$0]++' | paste -sd, -)
           if [ -n "$prs" ] && [ -n "$crow" ]; then

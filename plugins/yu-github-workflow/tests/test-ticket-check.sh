@@ -409,6 +409,13 @@ printf '%s\n \n%s\n%s\n' '[實作] 甲' "$DEMO" "$ANC" > "$FC/view-1"
 run_main "$FC"
 want_main '⬛ 補上內容 ⇒ 全綠' "$([ "$RC" = 0 ] && ! has '格9'; echo $?)"
 
+# ── 大輸出：會關票的 PR 清單（含每張票內文）遠大於管線緩衝時，查前面的票不可以讓整支死在半路 ──
+cp -R "$FC" "$T/fx-d"
+pad=$(b64 "$(head -c 3000 /dev/zero | tr '\0' 'x')")
+i=100; while [ "$i" -lt 200 ]; do printf '%s\t\t%s\n' "$i" "$pad" >> "$T/fx-d/closers"; i=$((i+1)); done
+run_main "$T/fx-d"
+want_main '大輸出 ⇒ 跑到最後一行總結、rc=0' "$([ "$RC" = 0 ] && has '施工票 1 張' && ! has 'Broken pipe'; echo $?)"
+
 # ── 只讀：整支跑下來沒有任何寫入型呼叫 ──
 want_main '假 gh 沒收到寫入型呼叫' "$(! grep -Eq -- '(^| )(-X|--method)( |$)|issue (edit|create|close|comment)|label (create|edit|delete)' "$FAKE_LOG"; echo $?)"
 want_main '假 gh 有被呼叫到（上一條不是空帳本的假綠）' "$([ "$(grep -c . "$FAKE_LOG")" -gt 20 ]; echo $?)"
