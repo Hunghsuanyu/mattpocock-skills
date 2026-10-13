@@ -241,6 +241,8 @@ want_refs ''      "$(printf '`Closes %s5`' "$H")"                       # code s
 want_refs '5'     "$(printf 'closes example-org/app-one%s5' "$H")"      # 指名本 repo
 want_refs ''      "$(printf 'closes example-org/other%s5' "$H")"        # 別的 repo
 want_refs ''      "$(printf 'encloses %s5' "$H")"                       # 字中間不算關鍵字
+want_refs '7'     "$(printf '```\nCloses %s5\n```\nCloses %s7' "$H" "$H")"   # fenced（```）裡不算，圍欄外照算
+want_refs '7'     "$(printf '~~~bash\nfixes %s5\n```\nfixes %s6\n~~~\nfixes %s7' "$H" "$H" "$H")"   # ~~~ 只被 ~~~ 關上
 
 # ══ 設定區塊解析 ══
 CFG_DOC="$(printf '%s\n' '# GitHub 工作流設定' '' '## 機器讀的欄位' '' '```text' \

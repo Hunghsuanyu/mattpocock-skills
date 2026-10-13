@@ -141,10 +141,13 @@ closes_problem() {
 }
 
 # 格 7 的整合 PR：PR 內文用關閉關鍵字（close／fix／resolve 各種時態）指到本 repo 的票號，一行一個。
-# 參數：PR 內文、本 repo（owner/repo）。`Refs` 不是關閉關鍵字；code span 裡的關鍵字 GitHub 不認，先拿掉。
+# 參數：PR 內文、本 repo（owner/repo）。`Refs` 不是關閉關鍵字；code span 與 fenced code block 裡的關鍵字 GitHub 不認，先拿掉。
 # 指到別的 repo（`owner/repo` 加票號，且不是本 repo）的不算。
 pr_closing_refs() {
   printf '%s\n' "$1" | awk -v me="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" '
+    # fenced code block：``` 或 ~~~ 開頭的行開始，到同一種圍欄的行結束（圍欄行本身也不掃）。
+    fence == "" && match($0, /^[ \t]*(```|~~~)/) { fence = substr($0, RSTART + RLENGTH - 3, 3); next }
+    fence != "" { if ($0 ~ ("^[ \t]*" fence)) fence = ""; next }
     { s = tolower($0); gsub(/`[^`]*`/, "", s)
       while (match(s, /(^|[^a-z0-9_])(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?[ \t]+([a-z0-9_.-]+\/[a-z0-9_.-]+)?#[0-9]+/)) {
         m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
