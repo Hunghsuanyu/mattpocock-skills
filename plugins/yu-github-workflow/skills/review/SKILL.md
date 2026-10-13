@@ -1,24 +1,24 @@
 ---
-name: 審查
+name: review
 description: "審查一段改動或一份規格。改動模式：整合分支對預設分支的整段改動，Spec 與 Standards 兩軸各派一個子代理平行審、分開報告，再疊上驗證分級（決定審多深、要不要換廠牌外審）。規格模式：施工開工前，把 SPEC 與全部施工票送換廠牌的對抗式外審。只由擁有者手動叫用。Review a change set (integration branch vs. default branch, two axes: Spec and Standards, layered with the verification tier) or a spec plus all its tickets before building starts. Manual only."
 disable-model-invocation: true
 ---
 
 # 審查：兩軸審一段改動，疊上驗證分級
 
-這支**只能由擁有者自己打 `/yu-github-workflow:審查` 叫用**。其他 skill 或總指揮走到要審查的時候，只印出這個指令請擁有者打，不代叫，也不照本檔的流程自己做。
+這支**只能由擁有者自己打 `/yu-github-workflow:review` 叫用**。其他 skill 或總指揮走到要審查的時候，只印出這個指令請擁有者打，不代叫，也不照本檔的流程自己做。
 
 審查只報告、只送審；修交給另派的子代理（第 5 節）。不合併、不部署、不開 PR（開 PR 是 `pr` 那支）。
 
 ## 1. 先讀私有擴充
 
-照 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md) 的三步讀這支 skill 的補充（skill 名 `審查`）：
+照 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md) 的三步讀這支 skill 的補充（skill 名 `review`）：
 
 1. 用 Bash 跑這一條，逐字照抄：`printenv GITHUB_WORKFLOW_PRIVATE_DIR`
    - `printenv` 退出碼 1 且沒有輸出＝未設定；其他情況（被權限擋、工具錯誤、沒跑成）→ 停下告訴擁有者，不當成未設定。
 2. 輸出是空的（變數沒設）→ 回報「私有擴充：未設定」，照本體做。
-3. 有值 → 用 Read 讀 `<值>/審查.md`。
-   - 讀到 → 回報「私有擴充：已讀 審查.md」，內容當成補充規則，與本體一起遵守。
+3. 有值 → 用 Read 讀 `<值>/review.md`。
+   - 讀到 → 回報「私有擴充：已讀 review.md」，內容當成補充規則，與本體一起遵守。
    - 讀不到 → 停下告訴擁有者讀不到哪個路徑，**不要照本體繼續**。
 
 補充只能加、不能推翻本體；兩者衝突時把兩句並列給擁有者決定。
@@ -98,7 +98,7 @@ Standards 軸另外一律帶下面這份**壞味道基準**（Fowler《重構》
   - 突變只突變這次新增或改動的斷言，不跑全量。兩個方向都要：改回壞的樣子必須紅，還原必須綠。
   - 真環境讀回一次，配一個對照組。受測與對照回一樣的結果＝這一輪什麼都沒測到。
 - **`重驗證-自檢`**：加上該類的專屬證據（labels.md 第一節③）。
-- **`重驗證-外審`（①部署管線、③存取控制與身分判斷）**：換廠牌的對抗式外審，**一定在開整合 PR 之前做完**——同一個 repo 的 PR 會用分支裡的 workflow 跑、拿得到 secret。只送改動處；①要求逐行讀部署計畫的輸出。送審手法見 [external-review.md](${CLAUDE_PLUGIN_ROOT}/skills/審查/references/external-review.md)；有私有擴充就照它的送審流程。
+- **`重驗證-外審`（①部署管線、③存取控制與身分判斷）**：換廠牌的對抗式外審，**一定在開整合 PR 之前做完**——同一個 repo 的 PR 會用分支裡的 workflow 跑、拿得到 secret。只送改動處；①要求逐行讀部署計畫的輸出。送審手法見 [external-review.md](${CLAUDE_PLUGIN_ROOT}/skills/review/references/external-review.md)；有私有擴充就照它的送審流程。
 - **票上的檢核標了外審級的**，由驗證方對改動處重跑一次，不只看施工者貼的輸出。
 - **不等、不請人測**：不寫「等幾小時再看」「請人實測」。我方觸發一次、讀回兩端的一手紀錄、配對照組，測過就算驗收。只有我方工具碰不到的地方才請擁有者做一個動作，請之前先想自己有沒有路。
 
@@ -118,7 +118,7 @@ Standards 軸另外一律帶下面這份**壞味道基準**（Fowler《重構》
 
 **只派一軌。** 步驟：
 
-1. **準備送審材料**：SPEC 與全部施工票的純文字副本。只送副本，見 [external-review.md](${CLAUDE_PLUGIN_ROOT}/skills/審查/references/external-review.md)；導出的指令與要附哪些檔，有私有擴充就照它。
+1. **準備送審材料**：SPEC 與全部施工票的純文字副本。只送副本，見 [external-review.md](${CLAUDE_PLUGIN_ROOT}/skills/review/references/external-review.md)；導出的指令與要附哪些檔，有私有擴充就照它。
 2. **換廠牌送審**，不要用開票的同一個模型——同一個模型只會補錯字、補遺漏，不會推翻自己的假設。提示詞寫成對抗式（任務是「試著弄壞它」）。
 3. **每一條修正先用自家模型複核**（同第 5 節）。
 4. **複核通過的才改票**。改完在外審票留言列出「動了哪幾張票的哪一段」，然後關外審票 ⇒ 前置自動解除，施工可以開工。

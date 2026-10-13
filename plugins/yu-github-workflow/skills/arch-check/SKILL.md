@@ -1,5 +1,5 @@
 ---
-name: 架構健檢
+name: arch-check
 description: "掃一段 codebase，找出值得「做深」的模組，產出一份 Markdown 交接稿（候選、不值得動、開票草稿），報告出來就停。只能由擁有者手動叫用，通常在開下一階段之前跑一次。Scan part of a codebase for deepening opportunities and write a Markdown handoff report (candidates, not-worth-it list, ticket drafts); stop after the report."
 disable-model-invocation: true
 ---
@@ -10,13 +10,13 @@ disable-model-invocation: true
 
 ## 1. 先讀私有擴充
 
-照 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md) 的三步讀這支 skill 的補充（skill 名 `架構健檢`）：
+照 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md) 的三步讀這支 skill 的補充（skill 名 `arch-check`）：
 
 1. 用 Bash 跑這一條，整條逐字照抄，不加引號、不接 `||`／`&&`、不改寫成 `echo`、`test` 或其他寫法：`printenv GITHUB_WORKFLOW_PRIVATE_DIR`
    - `printenv` 退出碼 1 且沒有輸出＝未設定；其他情況（被權限擋、工具錯誤、沒跑成）→ 停下告訴擁有者，不當成未設定。
 2. 未設定 → 回報「私有擴充：未設定」，照本體做。**不讀任何私有檔。**
-3. **有值才讀私有檔**：用 Read 讀 `<值>/架構健檢.md`。
-   - 讀到 → 回報「私有擴充：已讀 架構健檢.md」，內容當補充規則，與本體一起遵守。
+3. **有值才讀私有檔**：用 Read 讀 `<值>/arch-check.md`。
+   - 讀到 → 回報「私有擴充：已讀 arch-check.md」，內容當補充規則，與本體一起遵守。
    - 讀不到 → 停下，告訴擁有者讀不到哪個路徑，不要照本體繼續。
 
 私有擴充通常會指定三件事：**專案脈絡與規格／遷移計畫在哪**（第 3 節）、**報告寫到哪**（第 6 節）、**否決理由寫到哪**（第 8 節）。補充只能加、不能推翻本體；兩者衝突時把兩句並列給擁有者決定。
