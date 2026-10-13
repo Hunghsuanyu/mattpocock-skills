@@ -1,0 +1,3 @@
+s/\*) ef=2 ;;/*) ef=1 ;;/
+s/"\$pbase" = "\$defb"/"$pbase" != "$defb"/
+s/else if (!c)/else if (0)/
