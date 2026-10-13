@@ -6,6 +6,7 @@ description: Smoke test for this plugin. Use when the user says "plugin 實測" 
 照 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md) 的三步讀這支 skill 的補充（skill 名 `plugin-smoke`）：
 
 1. 用 Bash 跑這一條，逐字照抄：`printenv GITHUB_WORKFLOW_PRIVATE_DIR`
+   - `printenv` 退出碼 1 且沒有輸出＝未設定；其他情況（被權限擋、工具錯誤、沒跑成）→ 停下告訴擁有者，不當成未設定。
 2. 輸出是空的 → 狀態是 `未設定`。
 3. 有值 → 用 Read 讀 `<值>/plugin-smoke.md`。
    - 讀到 → 狀態是 `已讀 plugin-smoke.md`。
