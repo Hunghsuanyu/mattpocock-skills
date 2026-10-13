@@ -8,28 +8,17 @@
 |---|---|
 | 環境變數 | `GITHUB_WORKFLOW_PRIVATE_DIR`，值是一個目錄的絕對路徑 |
 | 檔名 | `<skill 名>.md`，一支 skill 一個檔；skill 名就是 `SKILL.md` frontmatter 的 `name` |
-| 沒設變數 | 正常情形。每支 skill 照本體做，不提示、不報錯 |
+| 沒設變數 | 正常情形。每支 skill 回報「未設定」後照本體做 |
 
 ## 每支 skill 開頭怎麼讀
 
-1. 用 Bash 讀環境變數與檔案，不要憑印象判斷有沒有設。範本（把 `<skill 名>` 換成自己的名字）：
+三步，每支 skill 都一樣，不要改寫、不要憑印象判斷變數有沒有設：
 
-   ```bash
-   if [ -z "${GITHUB_WORKFLOW_PRIVATE_DIR:-}" ]; then echo "STATE=unset"
-   elif [ ! -d "$GITHUB_WORKFLOW_PRIVATE_DIR" ]; then echo "STATE=missing-dir"
-   elif [ -f "$GITHUB_WORKFLOW_PRIVATE_DIR/<skill 名>.md" ]; then echo "STATE=read"; cat "$GITHUB_WORKFLOW_PRIVATE_DIR/<skill 名>.md"
-   else echo "STATE=no-file"; fi
-   ```
-
-2. 依結果處理：
-
-   | STATE | 處理 |
-   |---|---|
-   | `unset` | 照本體做 |
-   | `no-file` | 照本體做（這支 skill 沒有補充） |
-   | `read` | 檔案內容當成這支 skill 的補充規則，與本體一起遵守 |
-   | `missing-dir` | 停下來告訴擁有者「變數指到的目錄不存在」。設了變數卻讀不到，多半是路徑寫錯，照本體做會讓補充規則靜默失效 |
-   | 指令沒跑成、沒有 `STATE=` 行 | 回報「沒量到」，不要當成 `unset` |
+1. 用 Bash 跑這一條，逐字照抄：`printenv GITHUB_WORKFLOW_PRIVATE_DIR`
+2. 輸出是空的（變數沒設）→ 回報「私有擴充：未設定」，照本體做。
+3. 有值 → 用 Read 讀 `<值>/<skill 名>.md`。
+   - 讀到 → 回報「私有擴充：已讀 <檔名>」，檔案內容當成這支 skill 的補充規則，與本體一起遵守。
+   - 讀不到（目錄不存在或沒有這個檔）→ 停下來告訴擁有者讀不到哪個路徑，**不要照本體繼續**。設了變數卻讀不到，多半是路徑或檔名寫錯，照本體做會讓補充規則靜默失效。
 
 ## 補充只能加，不能推翻
 
@@ -47,4 +36,4 @@ hook 要留紀錄（例如 hook 帳本）時，寫到 `${CLAUDE_PLUGIN_DATA}/hoo
 
 ## skill 內文怎麼指到 plugin 自己的檔
 
-`SKILL.md` 內文寫 `${CLAUDE_PLUGIN_ROOT}/<相對路徑>`，載入時會被換成這個 plugin 的絕對路徑（`${CLAUDE_PLUGIN_DATA}` 也一樣會被換掉）。其他環境變數（包括 `GITHUB_WORKFLOW_PRIVATE_DIR`）不會被替換，要在 Bash 裡讀。
+`SKILL.md` 內文寫 `${CLAUDE_PLUGIN_ROOT}/<相對路徑>`，載入時會被換成這個 plugin 的絕對路徑（`${CLAUDE_PLUGIN_DATA}` 也一樣會被換掉）。其他環境變數（包括 `GITHUB_WORKFLOW_PRIVATE_DIR`）不會被替換，所以照上面第 1 步用 `printenv` 讀。
