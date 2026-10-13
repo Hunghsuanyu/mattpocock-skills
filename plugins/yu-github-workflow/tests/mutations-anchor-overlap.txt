@@ -1,0 +1,1 @@
+s/elif is_blocked "\$b" "\$a"/elif false/

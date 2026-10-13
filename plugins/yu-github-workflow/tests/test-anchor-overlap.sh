@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# scripts/anchor-overlap.sh 的測試。gh 一律換成讀夾具的假程式（mktemp 目錄、放在 PATH 最前面），不碰任何真 repo。
+# 夾具：body-<n>＝票內文（gh 的 --jq .body 之後）；blocked-<n>＝blocked_by（--jq 之後，一行 `owner/repo<TAB>號碼`）；
+#       fail-body-<n>／fail-blocked-<n> 存在 ⇒ 那一顆回 HTTP 錯誤。
+# 票號一律在執行時組出（H 變數），檔案裡不寫「井號接數字」。
+#
+# 用法：tests/test-anchor-overlap.sh
+# 退出碼：0＝全過；1＝有案例失敗。
+set -uo pipefail
+TAO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 9
+TAO_SCRIPT="${TAO_DIR}/../scripts/anchor-overlap.sh"
+[ -f "${TAO_SCRIPT}" ] || { echo "FAIL 檔案不存在：${TAO_SCRIPT}"; exit 1; }
+
+H='#'
+pass=0; fail=0
+T=$(mktemp -d) || exit 9
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/bin"
+cat > "$T/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_LOG"
+case " $* " in
+  *" -X "*|*" --method "*|*" -f "*|*" -F "*) echo "假 gh：拒絕寫入型呼叫 $*" >&2; exit 97 ;;
+esac
+num() { local s="${1#repos/*/issues/}"; printf '%s' "${s%%[/?]*}"; }
+case "$1 $2" in
+  'api --paginate')
+    case "$3" in
+      repos/*/issues/*/dependencies/blocked_by*)
+        n=$(num "$3")
+        [ -f "$FX/fail-blocked-$n" ] && { echo 'gh: Server Error (HTTP 502)' >&2; exit 1; }
+        [ -f "$FX/blocked-$n" ] && cat "$FX/blocked-$n"; exit 0 ;;
+    esac ;;
+  'api repos/'*)
+    n=$(num "$2")
+    [ -f "$FX/fail-body-$n" ] && { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }
+    cat "$FX/body-$n"; exit 0 ;;
+esac
+echo "假 gh：沒預期的呼叫 $*" >&2; exit 97
+FAKE
+chmod +x "$T/bin/gh"
+export PATH="${T}/bin:${PATH}" FAKE_LOG="${T}/calls.log"; : > "$FAKE_LOG"
+if [ "$(command -v gh)" = "$T/bin/gh" ]; then pass=$((pass+1)); else fail=$((fail+1)); echo "🔴 拿到的不是假 gh：$(command -v gh)"; fi
+
+R=example-org/app-one
+S1=0123456789abcdef0123456789abcdef01234567
+S2=89abcdef0123456789abcdef0123456789abcdef
+link() { printf -- '- [%s](https://github.com/%s/blob/%s/%s)\n' "$3" "$1" "$2" "$3"; }
+# 票內文：$1＝錨點段內容
+body() { printf '%s\n\n## 做完能展示什麼\n跑得出來。\n\n## 錨點\n%s\n\n## 待辦\n- 不在錨點段的連結不算：https://github.com/%s/blob/%s/other.sh\n' \
+  "依 SPEC 設計" "$1" "$R" "$S1"; }
+
+RC=0; OUT=''
+run() {  # 夾具目錄 票號…
+  local d="$1"; shift
+  OUT=$(FX="$d" bash "$TAO_SCRIPT" "$R" "$@" 2>&1); RC=$?
+}
+has() { printf '%s\n' "$OUT" | grep -Fq -- "$1"; }
+ngs() { printf '%s\n' "$OUT" | { grep -c '^NG' || true; }; }
+want() {  # 名稱 條件結果（0＝過）
+  if [ "$2" = 0 ]; then pass=$((pass+1)); printf '   ✔ %s\n' "$1"
+  else fail=$((fail+1)); printf '🔴 %s（rc=%s）\n%s\n' "$1" "$RC" "$OUT"; fi
+}
+endline() { [ "$(printf '%s\n' "$OUT" | tail -1)" = "END rc=$RC" ]; }
+
+# ── 基本夾具：1、2 共用 a.sh（SHA 不同、帶 ?plain=1 與 #L 也算同一個檔）；3 只碰 c.sh ──
+mk() {
+  local d="$1"; mkdir -p "$d"
+  body "$(link "$R" "$S1" a.sh; link "$R" "$S1" b.md)" > "$d/body-1"
+  body "$(printf -- '- [a](https://github.com/%s/blob/%s/a.sh?plain=1#L3-L9)\n' "$R" "$S2")" > "$d/body-2"
+  body "$(link "$R" "$S1" c.sh)" > "$d/body-3"
+}
+
+# 有交集、沒有擋 ⇒ NG
+D="$T/ng"; mk "$D"
+run "$D" 1 2 3
+want '有交集無擋 ⇒ rc=1、印 NG 那一對與共用檔' "$([ "$RC" = 1 ] && has "NG ${H}1 ${H}2 example-org/app-one/a.sh" && [ "$(ngs)" = 1 ] && endline; echo $?)"
+want '沒交集的那幾對不印 NG' "$(! has "${H}3"; echo $?)"
+
+# 有交集、2 被 1 擋（2 的 blocked_by 有 1）⇒ OK
+D="$T/fwd"; mk "$D"; printf '%s\t%s\n' "$R" 1 > "$D/blocked-2"
+run "$D" 1 2 3
+want '有交集、後一張被前一張擋 ⇒ rc=0、OK' "$([ "$RC" = 0 ] && has "OK ${H}1 ${H}2" && [ "$(ngs)" = 0 ] && endline; echo $?)"
+
+# 有交集、1 被 2 擋（反方向）⇒ OK
+D="$T/rev"; mk "$D"; printf '%s\t%s\n' "$R" 2 > "$D/blocked-1"
+run "$D" 1 2 3
+want '有交集、前一張被後一張擋（反方向）⇒ rc=0、OK' "$([ "$RC" = 0 ] && has "OK ${H}1 ${H}2" && [ "$(ngs)" = 0 ] && endline; echo $?)"
+
+# ⬛ 對照：擋它的是別的 repo 的同號票 ⇒ 不算擋
+D="$T/other"; mk "$D"; printf '%s\t%s\n' example-org/app-two 2 > "$D/blocked-1"
+run "$D" 1 2
+want '⬛ 別的 repo 的同號票擋 ⇒ 不算擋、rc=1' "$([ "$RC" = 1 ] && [ "$(ngs)" = 1 ] && endline; echo $?)"
+
+# 別的 repo 的同路徑 ⇒ 不是同一個檔
+D="$T/xrepo"; mkdir -p "$D"
+body "$(link "$R" "$S1" a.sh)" > "$D/body-1"
+body "$(link example-org/app-two "$S1" a.sh)" > "$D/body-2"
+run "$D" 1 2
+want '不同 repo 的同名路徑 ⇒ 不算交集、rc=0' "$([ "$RC" = 0 ] && [ "$(ngs)" = 0 ] && endline; echo $?)"
+
+# 無交集 ⇒ OK，而且不必查 blocked_by
+D="$T/none"; mkdir -p "$D"
+body "$(link "$R" "$S1" a.sh)" > "$D/body-1"
+body "$(link "$R" "$S1" b.sh)" > "$D/body-2"
+: > "$FAKE_LOG"
+run "$D" 1 2
+want '無交集 ⇒ rc=0、沒有 NG' "$([ "$RC" = 0 ] && [ "$(ngs)" = 0 ] && endline; echo $?)"
+want '無交集 ⇒ 沒去查 blocked_by' "$(! grep -q blocked_by "$FAKE_LOG"; echo $?)"
+
+# 兩個共用檔 ⇒ 一檔一行
+D="$T/two"; mkdir -p "$D"
+body "$(link "$R" "$S1" a.sh; link "$R" "$S1" b.sh)" > "$D/body-1"
+body "$(link "$R" "$S2" b.sh; link "$R" "$S2" a.sh)" > "$D/body-2"
+run "$D" 1 2
+want '共用兩個檔 ⇒ 兩行 NG' "$([ "$RC" = 1 ] && [ "$(ngs)" = 2 ] && endline; echo $?)"
+
+# API 失敗（blocked_by 讀不到）⇒ UNKNOWN、rc=2
+D="$T/apifail"; mk "$D"; : > "$D/fail-blocked-2"
+run "$D" 1 2
+want 'blocked_by 讀不到 ⇒ 印 UNKNOWN 且 rc=2（不是 0）' "$([ "$RC" = 2 ] && has "UNKNOWN ${H}1 ${H}2" && [ "$(ngs)" = 0 ] && endline; echo $?)"
+
+# 內文讀不到 ⇒ UNKNOWN、rc=2
+D="$T/bodyfail"; mk "$D"; : > "$D/fail-body-3"
+run "$D" 1 3
+want '內文讀不到 ⇒ UNKNOWN、rc=2' "$([ "$RC" = 2 ] && has "UNKNOWN ${H}1 ${H}3" && endline; echo $?)"
+
+# 錨點段沒有連結（解析失敗）⇒ UNKNOWN、rc=2
+D="$T/noanc"; mk "$D"; printf '%s\n\n## 錨點\n- 見上一張票\n' 'x' > "$D/body-3"
+run "$D" 1 3
+want '錨點段沒有 blob 連結 ⇒ UNKNOWN、rc=2' "$([ "$RC" = 2 ] && has 'blob/<40 碼 SHA>' && endline; echo $?)"
+
+# 有 NG 又有一顆 API 失敗 ⇒ rc=2（NG 照印）
+D="$T/mixed"; mk "$D"
+body "$(link "$R" "$S1" c.sh)" > "$D/body-4"; : > "$D/fail-blocked-4"
+run "$D" 1 2 3 4
+want '有 NG 又有 API 失敗 ⇒ rc=2、NG 照印' "$([ "$RC" = 2 ] && [ "$(ngs)" = 1 ] && has "UNKNOWN ${H}3 ${H}4" && endline; echo $?)"
+
+# 參數用錯 ⇒ rc=2、仍印結束行
+run "$T/none"
+want '只給 repo 沒給票號 ⇒ rc=2、END 行' "$([ "$RC" = 2 ] && endline; echo $?)"
+
+want '假 gh 沒收到寫入型呼叫' "$(! grep -Eq -- '(^| )(-X|--method|-f|-F)( |$)' "$FAKE_LOG"; echo $?)"
+want '假 gh 有被呼叫到（上一條不是空帳本的假綠）' "$([ "$(grep -c . "$FAKE_LOG")" -gt 5 ]; echo $?)"
+
+printf '\n%d 過／%d 失敗（共 %d）\n' "$pass" "$fail" "$((pass+fail))"
+[ "$fail" -eq 0 ]
