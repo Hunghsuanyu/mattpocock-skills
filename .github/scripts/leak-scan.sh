@@ -5,33 +5,46 @@
 # Usage:
 #   leak-scan.sh commits <repo dir> <exclude-ref> <head> [<base>]
 #       Scans every commit in <base>..<head> (or all of <head> when <base> is empty) that is not
-#       reachable from <exclude-ref> (upstream main): added diff lines, added/renamed paths,
-#       commit message, author and committer email. Merge commits: message plus --cc lines/paths.
+#       reachable from <exclude-ref> (upstream main): added diff lines (diffed with --text, so
+#       binary files are scanned too), added/renamed paths, commit message, author and committer
+#       name and email. Merge commits: message plus --cc lines/paths. A diff git still reports as
+#       binary is a hit (pattern=binary): its content was not scanned.
 #   leak-scan.sh text <label>
 #       Scans stdin, one record per line (used for PR title and body).
 #
+# Not scanned (outside this script's domain): tags and tag messages, branch names, PR and
+# review comments, issue text, release notes. Only commits and what is piped into "text".
+#
 # Output never contains the matched text or the file path, only where it was:
 #   HIT commit=<n> sha=<sha12> at=<kind>:<pos> pattern=<k>     (k = line number in LEAK_PATTERNS)
-# Exit: 0 clean, 1 hit, 2 bad usage / git failure / patterns missing (never read as clean).
+# Perl warnings are never printed (a regex warning quotes the pattern): a pattern that warns
+# when compiled is reported as "pattern line <k> has a warning", any other warning as a count;
+# both exit 2.
+# Exit: 0 clean, 1 hit, 2 bad usage / git failure / patterns missing or warning (never read as clean).
 #
-# Optional env: LEAK_OWNER and LEAK_NOREPLY are removed from the text before scanning
-# (the fork owner's own account name and noreply address).
+# Optional env: LEAK_NOREPLY (the fork owner's noreply address) is removed from every record
+# before scanning; LEAK_OWNER (the owner's account name) only from the author/committer email.
 set -uo pipefail
 
 SCANNER=''
 IFS= read -r -d '' SCANNER <<'PERL' || true
 use strict; use warnings;
+my $WARNED = 0;                        # warning text can quote a pattern: count it, never print it
+$SIG{__WARN__} = sub { $WARNED++ };
+sub fin { my $rc = shift;
+  if ($WARNED) { print STDERR "leak-scan: $WARNED perl warning(s), text suppressed\n"; $rc = 2; }
+  exit $rc; }
 my $mode = shift @ARGV;
 
 if ($mode eq 'lines2rec') {            # arg: position prefix; stdin line -> "<prefix>:<n>\t<line>"
   my $p = shift @ARGV; my $n = 0;
   while (my $l = <STDIN>) { $n++; chomp $l; $l =~ s/\r\z//; print "$p:$n\t$l\n"; }
-  exit 0;
+  fin(0);
 }
 if ($mode eq 'names2rec') {           # arg: prefix; stdin = NUL separated paths -> "<prefix>:path:<n>\t<path>"
   my $p = shift @ARGV; my $n = 0; local $/ = "\0";
   while (my $f = <STDIN>) { chomp $f; next if $f eq ''; $n++; $f =~ s/[\t\r\n]/ /g; print "$p:path:$n\t$f\n"; }
-  exit 0;
+  fin(0);
 }
 if ($mode eq 'diff2rec') {             # args: prefix, column count (1, or parent count for merges)
   my ($p, $nc) = @ARGV; my ($fi, $ln, $hdr) = (0, 0, 0);
@@ -40,6 +53,7 @@ if ($mode eq 'diff2rec') {             # args: prefix, column count (1, or paren
     chomp $l; $l =~ s/\r\z//;
     if ($l =~ /^diff /) { $hdr = 1; $fi++; next; }
     if ($hdr) {
+      if ($l =~ /^(?:Binary files |GIT binary patch)/) { print "$p:diff:file$fi:binary\t\n"; next; }
       if ($l =~ /^(\@{2,}) -.*? \+(\d+)(?:,\d+)? \1/) { $hdr = 0; $ln = $2; }
       next;
     }
@@ -50,7 +64,7 @@ if ($mode eq 'diff2rec') {             # args: prefix, column count (1, or paren
     if ($pre eq $all) { print "$p:diff:file$fi:line$ln\t", substr($l, $nc), "\n"; }
     $ln++;
   }
-  exit 0;
+  fin(0);
 }
 die "unknown mode $mode\n" unless $mode eq 'records';
 
@@ -58,8 +72,10 @@ die "unknown mode $mode\n" unless $mode eq 'records';
 my (@pat, $k);
 for my $p (split /\n/, ($ENV{LEAK_PATTERNS} // '')) {
   $k++; $p =~ s/\r\z//; next if $p eq '';
+  my $w0 = $WARNED;
   my $re = eval { qr/$p/ };
   unless (defined $re) { print STDERR "leak-scan: pattern line $k does not compile\n"; exit 2; }
+  if ($WARNED != $w0) { print STDERR "leak-scan: pattern line $k has a warning\n"; exit 2; }
   push @pat, [$k, $re];
 }
 unless (@pat) { print STDERR "leak-scan: LEAK_PATTERNS is empty or unreadable\n"; exit 2; }
@@ -76,14 +92,16 @@ sub out { my ($pos, $what) = @_; my ($c, $s, $at) = split /:/, $pos, 3;
 while (my $l = <STDIN>) {
   chomp $l; $l =~ s/\r\z//; $n++;
   my ($pos, $t) = split /\t/, $l, 2; $t //= '';
-  if ($pos =~ /:(?:author|committer)-email:/ && $t !~ $NR) { out($pos, 'non-noreply-email'); }
+  if ($pos =~ /:binary\z/) { out($pos, 'binary'); next; }
+  my $is_email = $pos =~ /:(?:author|committer)-email:/;
+  if ($is_email && $t !~ $NR) { out($pos, 'non-noreply-email'); }
   $t =~ s/\Q$noreply\E//g if $noreply ne '';
-  $t =~ s/\Q$owner\E//g   if $owner ne '';
+  $t =~ s/\Q$owner\E//g   if $is_email && $owner ne '';
   for my $pp (@pat) { my ($i, $re) = @$pp; while ($t =~ /$re/g) { out($pos, $i); } }
   while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR; }
 }
 print STDERR "leak-scan: $n records, $hits hits\n";
-exit($hits ? 1 : 0);
+fin($hits ? 1 : 0);
 PERL
 [ -n "$SCANNER" ] || { echo 'leak-scan: scanner failed to load' >&2; exit 2; }
 
@@ -121,19 +139,23 @@ for c in $COMMITS; do
   NC=$((NC+1)); s=$(printf '%.12s' "$c"); p="c${NC}:${s}"
   par=$("${G[@]}" rev-list --parents -n 1 "$c") || die2 "cannot read parents"
   set -- $par; np=$(( $# - 1 )); [ "$np" -ge 1 ] || np=1
+  an=$("${G[@]}" log -1 --format=%an "$c") || die2 "cannot read author"
   ae=$("${G[@]}" log -1 --format=%ae "$c") || die2 "cannot read author"
+  cn=$("${G[@]}" log -1 --format=%cn "$c") || die2 "cannot read committer"
   ce=$("${G[@]}" log -1 --format=%ce "$c") || die2 "cannot read committer"
-  msg=$("${G[@]}" log -1 --format=%B "$c") || die2 "cannot read message"
+  "${G[@]}" log -1 --format=%B "$c" > "$TMPD/msg" || die2 "cannot read message"
+  # Diffs go to a file, not a variable: --text output can hold NUL bytes.
   if [ "$np" -ge 2 ]; then
-    diff=$("${G[@]}" show --cc --format= --no-color --no-ext-diff --no-textconv "$c") || die2 "git show --cc failed"
+    "${G[@]}" show --cc --text --format= --no-color --no-ext-diff --no-textconv "$c" > "$TMPD/diff" || die2 "git show --cc failed"
     "${G[@]}" diff-tree -r -z --name-only --no-commit-id --cc "$c" > "$TMPD/names" || die2 "diff-tree --cc failed"
   else
-    diff=$("${G[@]}" show --format= --no-color --no-ext-diff --no-textconv -U0 "$c") || die2 "git show failed"
+    "${G[@]}" show --text --format= --no-color --no-ext-diff --no-textconv -U0 "$c" > "$TMPD/diff" || die2 "git show failed"
     "${G[@]}" diff-tree -r -z --name-only --no-commit-id --root -M --diff-filter=AR "$c" > "$TMPD/names" || die2 "diff-tree failed"
   fi
-  printf '%s:author-email:1\t%s\n%s:committer-email:1\t%s\n' "$p" "$ae" "$p" "$ce" >> "$REC" || die2 "write failed"
-  printf '%s\n' "$msg"  | perl -e "$SCANNER" -- lines2rec "${p}:msg" >> "$REC" || die2 "message records failed"
-  printf '%s\n' "$diff" | perl -e "$SCANNER" -- diff2rec "$p" "$np"  >> "$REC" || die2 "diff records failed"
+  printf '%s:author-name:1\t%s\n%s:author-email:1\t%s\n%s:committer-name:1\t%s\n%s:committer-email:1\t%s\n' \
+    "$p" "$an" "$p" "$ae" "$p" "$cn" "$p" "$ce" >> "$REC" || die2 "write failed"
+  perl -e "$SCANNER" -- lines2rec "${p}:msg" < "$TMPD/msg" >> "$REC" || die2 "message records failed"
+  perl -e "$SCANNER" -- diff2rec "$p" "$np" < "$TMPD/diff" >> "$REC" || die2 "diff records failed"
   perl -e "$SCANNER" -- names2rec "$p" < "$TMPD/names" >> "$REC" || die2 "path records failed"
 done
 echo "leak-scan: ${NC} commits after excluding upstream" >&2
