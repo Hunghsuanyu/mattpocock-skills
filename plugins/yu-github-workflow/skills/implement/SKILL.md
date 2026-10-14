@@ -29,9 +29,9 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
 
 1. **先說出票名**：`gh issue view <票號> -R <owner>/<repo>` 讀票，第一句話報出票名。
 2. **說出要從哪條整合分支開**：整合分支寫在票上或它的 SPEC 上。說明「會從整合分支 `<名>` 開分支，不從 main 開」。票與 SPEC 都沒寫整合分支 → 問，不要退回從預設分支開。
-3. **掛狀態與機器**：照 repo 設定（`docs/agents/github.md` 的「施工狀態記法」「機器標籤名」），標籤的意思以 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 為準。
+3. **掛狀態與機器**：照 repo 設定（`docs/agents/github.md` 的「施工狀態記法」「機器標籤名」），標籤的意思以 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 為準。同一份設定的「特殊禁忌」不是 `無` → 讀它底下的「特殊禁忌」段，整張票照著做。
    - 記法是狀態標籤：`gh issue edit <票號> -R <owner>/<repo> --add-label <施工中標籤> --add-label <這台的機器標籤>`。
-   - 記法是 Project Status：把票的 Status 改成進行中，再掛機器標籤，不掛狀態標籤。
+   - 記法是 Project Status：把票的 Status 改成 repo 設定「Status 選項 ID」裡施工中的那一個（`In Progress` 或 `施工中`），再掛機器標籤，不掛狀態標籤。開票自檢格 3 只認 `In Progress`、`施工中`、`待驗證` 這三個值當「有人在做」，選項名不是其中之一 → 停下告訴擁有者，不自己挑一個近似的。
    - 只改狀態與標籤，**不動票的內文**。
 4. **從整合分支開分支，一張票一個工作樹**：
    ```bash
@@ -66,14 +66,15 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
    - 分支與 HEAD 的完整 SHA（`git rev-parse HEAD` 取，不從短碼補）；
    - 可重跑的驗證指令與實際輸出、第 2 點的本機 CI 輸出；
    - 範圍外的發現（只記下，不改）。
-   - 最後一行署名：`— 🔧 施工｜<機器>｜<執行者>｜分支 <分支>`。執行者：自己是對話本身寫 `session <session id 前 8 碼>`；是被派出的子代理寫 `<派它的 session 前 8 碼>／施工子代理`。格式以 labels.md 的署名段為準；「不驗自己的票」就是比對執行者欄。
-5. 換狀態：施工中 → 待驗證（狀態標籤記法：`--add-label <待驗證標籤> --remove-label <施工中標籤>`；Project Status 記法改 Status）。換手給另一台時，機器標籤跟著換成接手的那一台。
+   - 最後一行署名：`— 🔨 施工｜<機器>｜<執行者>｜分支 <分支>`。執行者：自己是對話本身寫 `session <session id 前 8 碼>`；是被派出的子代理寫 `施工子代理 agent-<自己的 agent id 前 8 碼>@<派它的 session id 前 8 碼>`。格式以 labels.md 第三節為準；「不驗自己的票」就是比對執行者欄。
+5. 換狀態：施工中 → 待驗證（狀態標籤記法：`--add-label <待驗證標籤> --remove-label <施工中標籤>`；Project Status 記法把 Status 改成 repo 設定「Status 選項 ID」裡的 `待驗證`）。換手給另一台時，機器標籤跟著換成接手的那一台。
+   - **驗收由另一個 session 做**：這個 session 與它派出的子代理都不驗這張票（labels.md 第三節）。
 6. **不開 PR**。合進整合分支由另派的合併者做；整合分支收齊後才開一個 PR。
 
 ## 7. 界線
 
 - 不合併進 main（預設分支）、不自己合進整合分支、不部署、不發任何訊息（聊天、郵件、推播都算）。
 - 不改票的內文；只在票上留言。
-- **施工者不開票**：冒出的新工作記到 SPEC 的「尚未定義」段，並在 SPEC 留言通知開票的人；資安、個資、正式環境壞掉這類不能等的，在 SPEC 留言標 🔴 立刻報。
+- **施工者不開票、不改 SPEC 內文**：冒出的新工作在 SPEC **留言**，由指揮台寫進「尚未定義」段；資安、個資、正式環境壞掉這類不能等的，在 SPEC 留言標 🔴 立刻報。
 - 範圍外的發現只回報，不順手改。
 - 界線外的判斷（票上寫法與實際不符、要不要多做一件事）攤出來問，不要自己決定。

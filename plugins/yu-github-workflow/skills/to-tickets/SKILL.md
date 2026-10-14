@@ -1,6 +1,6 @@
 ---
 name: to-tickets
-description: "Split an existing SPEC issue into tracer-bullet build tickets: one fresh context each, every ticket with a demo statement, SHA-pinned anchors, K/H checks and three label groups, ordered only by native blocked-by edges, all blocked by the SPEC's external-review ticket. Finishes by running the ticket self-check and the anchor-overlap check; either one not returning 0 means the batch is not done. Use when the GitHub workflow entry skill routes here, or when the user runs /to-tickets with a SPEC."
+description: "Split an existing SPEC issue into tracer-bullet build tickets: one fresh context each, every ticket with a demo statement, SHA-pinned anchors, K/H checks and three label groups, ordered only by native blocked-by edges, all blocked by the SPEC's external-review ticket. Finishes by running the ticket self-check and the anchor-overlap check on this batch's ticket numbers; either one not returning 0 means the batch is not done. Use when the GitHub workflow entry skill routes here, or when the user runs /to-tickets with a SPEC."
 ---
 
 # 拆票：把一張 SPEC 切成施工票
@@ -23,7 +23,7 @@ description: "Split an existing SPEC issue into tracer-bullet build tickets: one
 ## 2. 讀來源與現況
 
 1. **讀 SPEC 全文與全部留言**：`gh issue view <SPEC 號> -R <owner/repo> --comments`。已經做的決定、尚未定義、刻意不做的事都要讀到；留言裡後來拍板的決定蓋過內文的舊寫法。
-2. **讀 repo 設定** `docs/agents/github.md`：票開在哪個 repo、施工狀態記法、整合分支怎麼命名。沒有這個檔＝還沒導入，先走 `setup`。
+2. **讀 repo 設定** `docs/agents/github.md`：票開在哪個 repo、施工狀態記法。沒有這個檔＝還沒導入，先走 `setup`。整合分支的名稱：SPEC 上寫了就用它；沒寫就照 `implement-spec` 第 2 節的命名規則（`integ/<SPEC 編號>-<簡稱>`）。
 3. **先查這件事是不是已經有分支做了**——`main` 上沒有，不等於沒人做過：做完在分支上等合併，與沒人做過，在 `main` 上長得一模一樣。
 
    ```bash
@@ -75,14 +75,16 @@ description: "Split an existing SPEC issue into tracer-bullet build tickets: one
 - **標籤**：照 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 第七節的票種表，施工票掛類型、優先、驗證各一個。狀態與機器開票時不掛，由領票的人掛。
 - 開票順序：被擋的放後面開，讓 `blocked-by` 指得到真的票號。
 
-## 7. 開完先自檢，兩支都 0 才算開完
+## 7. 開完先自檢，這一批兩支都 0 才算開完
+
+兩支都只對**這一批**的票號跑（repo 裡其他舊票的紅不算在這一批，也不擋這一批）：
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-check.sh <owner/repo>
+bash ${CLAUDE_PLUGIN_ROOT}/scripts/ticket-check.sh <owner/repo> <這批票號…>
 bash ${CLAUDE_PLUGIN_ROOT}/scripts/anchor-overlap.sh <owner/repo> <這批票號…>
 ```
 
-- `ticket-check.sh`：錨點段、SHA 存在、標籤、做完能展示什麼。退出碼 1 ＝還沒開完，照 NG 行修好再跑。各格意思見 [ticket-check.md](${CLAUDE_PLUGIN_ROOT}/references/ticket-check.md)。
+- `ticket-check.sh`：給了票號就只查那幾張；錨點段、SHA 存在、標籤、做完能展示什麼。退出碼 1 ＝還沒開完，照 NG 行修好再跑。各格意思見 [ticket-check.md](${CLAUDE_PLUGIN_ROOT}/references/ticket-check.md)。
 - `anchor-overlap.sh`：兩張票錨點指到同一個檔、之間沒有任何方向的 `blocked-by` → `NG <a> <b> <檔>`、退出碼 1。修法二選一：合成一張，或設 `blocked-by`。
   - 退出碼 2（印 `UNKNOWN`）＝有東西沒讀到。**這是沒量到，不是沒問題**：停下，補上讀不到的那一樣再跑。
   - 最後一行一定是 `END rc=<退出碼>`；沒有這行＝腳本中途崩潰，結果不算數。
@@ -90,12 +92,12 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/anchor-overlap.sh <owner/repo> <這批票號�
 
 ## 8. 施工中冒出的新工作（指揮台做決定時處理）
 
-- **施工者不開票**：冒出的新工作記到 SPEC 的「尚未定義」段並在 SPEC 留言；指揮台在做決定時統一處理（要做的開票、不做的寫進「刻意不做的事」）。
+- **施工者不開票、不改 SPEC 內文**：冒出的新工作在 SPEC **留言**，由指揮台寫進「尚未定義」段；指揮台在做決定時統一處理（要做的開票、不做的寫進「刻意不做的事」）。
 - **不能等的當場開**：資安、個資、正式環境壞掉 → SPEC 留言標 🔴，指揮台當場開票。
 - **併回原票的門檻**：同一個 repo、改動少於約 30 行、驗證等級不高於原票 → 在原票留言、併進原票的改動，不另開票。
 - **其餘開成衍生票**（只限計畫外冒出的）：掛 `衍生`、直接掛 SPEC（不掛原票底下：SPEC 的進度、閘門只看直接子票）、第一行寫 `從 #<原票號> 衍生`、在原票留言連結、掛齊三組標籤。
 - **衍生票排在它真正會影響的那一步**：不做會影響下一步才現在做；否則設成「真正受影響那張票」的 `blocked-by`，輪到時才做。方向不一定是原票擋它。
-- 開完一樣跑第 7 節兩支。
+- 開完一樣跑第 7 節兩支：`ticket-check.sh` 只給這次新開的衍生票；`anchor-overlap.sh` 給衍生票加上同一個 SPEC 底下還開著的施工票（重疊要和既有的票比才看得到）。
 
 ## 9. 交回
 
