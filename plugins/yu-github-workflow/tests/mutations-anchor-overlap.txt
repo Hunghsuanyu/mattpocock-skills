@@ -1,1 +1,10 @@
 s/if is_blocked "\$a" "\$b"; then/if false; then/
+s/u = u.rstrip(".,;:!?")/pass/
+s/^PUNCT = .*/PUNCT = ""/
+s/urllib\.parse\.unquote(/str(/
+s/bad.write(u + "\\n"); continue/continue/
+/index(y, x) == 1/s/else if (/else if (0 \&\& /
+s/if \[ "\$cnt" -eq 1 \] && \[ -f/if false \&\& [ -f/
+# 第2行起（修正軌補）：每行一發，各自單獨跑。依序：不剝結尾半形標點（「結尾標點」案例要紅）；不排除全形標點（同上）；
+#   不解百分比編碼（「百分比編碼」案例要紅）；抽不出 SHA 的連結直接略過（「抽不出 SHA」案例要紅）；
+#   tree 目錄不與底下的檔算交集（「tree 目錄」案例要紅）；單票讀不到不印 UNKNOWN（「單票」案例要紅）。
