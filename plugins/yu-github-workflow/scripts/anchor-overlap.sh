@@ -7,9 +7,13 @@
 # 怎麼判：
 #   1. 讀每張票內文的「## 錨點」段（`##` 開頭那行裡有「錨點」，到下一個 `## ` 為止），
 #      抽出 `https://github.com/<owner>/<repo>/blob/<40 碼 SHA>/<路徑>`（檔）與 `.../tree/<40 碼 SHA>/<目錄>`（目錄）連結。
+#      `/blame/`、`/raw/` 與 `https://raw.githubusercontent.com/<owner>/<repo>/<40 碼 SHA>/<路徑>` 也算檔；
+#      host 不分大小寫、可帶 `www.`。
 #      同一個檔＝同一個 owner/repo（不分大小寫）＋同一個路徑；SHA 不同也算同一個檔，`?plain=1` 與 `#L…` 不算進路徑。
-#      連結結尾黏著的全形／半形標點、反引號、句點剝掉；百分比編碼解回來再比。
-#      錨點段裡指向檔案（`/blob/`、`/tree/`）卻抽不出 40 碼 SHA 的 github 連結（例如 `blob/main/…`）⇒ 那張票印 `UNKNOWN`，不略過；
+#      連結結尾黏著的全形／半形標點、引號、波浪號、刪節號、反引號、句點、Markdown 強調（`*`、`_`）剝掉；
+#      最後一段是「檔名.副檔名」而後面直接接中文（例如 `a.md的說明`）⇒ 砍在副檔名後面
+#      （中文後面還有副檔名的，例如 `v1.2版說明.md`，當成檔名本身，不砍）。百分比編碼解回來再比；比對用位元組、不吃語系排序。
+#      錨點段裡指向檔案（上面幾種）卻抽不出 40 碼 SHA 的連結（例如 `blob/main/…`、`refs/heads/main/…`）⇒ 那張票印 `UNKNOWN`，不略過；
 #      不指向檔案的 github 連結（issue、pull、commit、留言）不是錨點，直接略過。
 #   2. 兩兩比對交集：同一個檔，或一邊是目錄、另一邊是目錄底下的檔（或子目錄）。沒有交集 ⇒ 不印。
 #   3. 有交集的一對，查兩個方向的 `issues/<n>/dependencies/blocked_by`（只看直接的擋，不追鏈）：
@@ -47,17 +51,27 @@ AOV_PY=''
 IFS= read -r -d '' AOV_PY <<'PY' || true
 import re, sys, urllib.parse
 bad = open(sys.argv[1], "w", encoding="utf-8")
-PUNCT = "，。、；：！？（）「」『』【】《》〈〉"
-url_re = re.compile(r"https?://github\.com/[^\s()\[\]<>\"'`" + PUNCT + "]+")
+PUNCT = "，。、；：！？（）「」『』【】《》〈〉“”‘’～…"
+TRAIL = ".,;:!?*_~"
+url_re = re.compile(r"https?://(?:www\.)?(github\.com|raw\.githubusercontent\.com)/([^\s()\[\]<>\"'`" + PUNCT + "]+)", re.I)
+# 最後一段「檔名.副檔名」後面直接接中文、而中文後面沒有再一個「.」⇒ 中文是正文，不是檔名
+cjk_tail = re.compile(r"^(.*\.[A-Za-z0-9]+)[^\x00-\x7f][^./]*$")
 out = []
-for u in url_re.findall(sys.stdin.buffer.read().decode("utf-8", "replace")):
-    u = u.rstrip(".,;:!?")
-    path = urllib.parse.unquote(re.split(r"[?#]", u.split("github.com/", 1)[1], 1)[0])
-    if not re.match(r"[^/]+/[^/]+/(blob|tree)/", path):
+for mo in url_re.finditer(sys.stdin.buffer.read().decode("utf-8", "replace")):
+    host, tail = mo.group(1).lower(), mo.group(2).rstrip(TRAIL)
+    head, sep, last = re.split(r"[?#]", tail, maxsplit=1)[0].rpartition("/")
+    c = cjk_tail.match(last)
+    if c:
+        tail = head + sep + c.group(1)
+    u = mo.group(0)[:mo.start(2) - mo.start(0)] + tail
+    path = urllib.parse.unquote(re.split(r"[?#]", tail, maxsplit=1)[0])
+    if host == "raw.githubusercontent.com":
+        path = re.sub(r"^([^/]+/[^/]+)/", r"\1/blob/", path)  # raw 網域沒有 blob 這一段：補上，照同一套規則
+    if not re.match(r"[^/]+/[^/]+/(blob|tree|blame|raw)/", path):
         continue  # 不是指向檔案的連結（issue、pull、commit、留言）：不是錨點，略過
-    m = re.match(r"([^/]+)/([^/]+)/(blob|tree)/([0-9a-f]{40})(?:/(.*))?$", path)
+    m = re.match(r"([^/]+)/([^/]+)/(blob|tree|blame|raw)/([0-9a-f]{40})(?:/(.*))?$", path)
     rest = ((m.group(5) or "").rstrip("/")) if m else ""
-    if not m or (m.group(3) == "blob" and not rest):
+    if not m or (m.group(3) != "tree" and not rest):
         bad.write(u + "\n"); continue
     key = (m.group(1) + "/" + m.group(2)).lower() + "/" + rest
     if m.group(3) == "tree":
@@ -107,7 +121,7 @@ is_blocked() {
 
 # 兩份清單的交集：同一個檔，或一邊是目錄（結尾 `/`）、另一邊在它底下；印較深的那一個
 shared_of() {
-  awk 'NR == FNR { a[++na] = $0; next }
+  LC_ALL=C awk 'NR == FNR { a[++na] = $0; next }
        { for (k = 1; k <= na; k++) { x = a[k]; y = $0
            if (x == y) print x
            else if (substr(x, length(x)) == "/" && index(y, x) == 1) print y
