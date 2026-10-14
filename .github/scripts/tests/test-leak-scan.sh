@@ -180,8 +180,12 @@ check 'commits: owner-substring pattern in author/committer name does not hit' '
 
 # ---------- 5d. a pattern that can match an empty string is refused ----------
 # Such a pattern used to loop forever once an owner span touched the end of a record.
-# Every run here goes through a 20 s alarm (perl alarm, rc 142), so a loop turns red instead of hanging.
-lim() { perl -e 'alarm shift; exec @ARGV' 20 "$@"; }
+# Every run here goes through a 20 s limit (rc 142), so a loop turns red instead of hanging. The
+# command runs in its own process group and the whole group is killed: killing only the shell
+# leaves the looping perl behind.
+lim() { perl -e '$t = shift; my $p = fork; die "fork failed\n" unless defined $p;
+  if (!$p) { setpgrp(0, 0); exec @ARGV; exit 127; }
+  $SIG{ALRM} = sub { kill "KILL", -$p; exit 142 }; alarm $t; waitpid($p, 0); exit($? >> 8)' 20 "$@"; }
 run lim env LEAK_PATTERNS='foo|' bash "$SCAN" text t < /dev/null
 check 'empty-matching pattern refused when loaded, even with no input => rc 2, line named only' '[ "$RC" -eq 2 ] && has "pattern line 1 can match an empty string" && lacks foo'
 run lim env LEAK_PATTERNS="$(printf 'ZZCANARYZZ\na*')" LEAK_OWNER=OwnerQQ bash "$SCAN" text t <<< 'hello OwnerQQ'
