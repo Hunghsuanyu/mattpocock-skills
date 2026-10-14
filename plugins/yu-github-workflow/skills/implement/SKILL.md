@@ -28,7 +28,7 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
 ## 3. 開工
 
 1. **先說出票名**：`gh issue view <票號> -R <owner>/<repo>` 讀票，第一句話報出票名。
-2. **說出要從哪條整合分支開**：整合分支寫在票上或它的 SPEC 上。說明「會從整合分支 `<名>` 開分支，不從 main 開」。票與 SPEC 都沒寫整合分支 → 問，不要退回從預設分支開。
+2. **說出要從哪條整合分支開**：名字以 SPEC 第 2 段「範圍」寫的為準（唯一來源），票上寫的是照抄。說明「會從整合分支 `<名>` 開分支，不從 main 開」。SPEC 沒寫，或票上寫的和 SPEC 不一樣 → 問，不要自己取名，也不要退回從預設分支開。
 3. **掛狀態與機器**：照 repo 設定（`docs/agents/github.md` 的「施工狀態記法」「機器標籤名」），標籤的意思以 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 為準。同一份設定的「特殊禁忌」不是 `無` → 讀它底下的「特殊禁忌」段，整張票照著做。
    - 記法是狀態標籤：`gh issue edit <票號> -R <owner>/<repo> --add-label <施工中標籤> --add-label <這台的機器標籤>`。
    - 記法是 Project Status：把票的 Status 改成 repo 設定「Status 選項 ID」裡施工中的那一個（`In Progress` 或 `施工中`），再掛機器標籤，不掛狀態標籤。開票自檢格 3 只認 `In Progress`、`施工中`、`待驗證` 這三個值當「有人在做」，選項名不是其中之一 → 停下告訴擁有者，不自己挑一個近似的。
@@ -54,11 +54,11 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
 - **資源限制**：
   - 本機同時跑測試最多 2 個（整個機器算，不是每個施工者各 2 個）；輪不到就先讀碼、改碼。
   - 突變只跑票上列出的那幾發；票上沒列就不跑；禁止全量突變。
-- **不做施工者自我審查**：不叫 code review 類 skill 審自己的改動。驗證一律另外派人。
+- **不做施工者自我審查**：不叫 code review 類 skill 審自己的改動。驗證一律交另一個 session（第 6 節）。
 
 ## 6. 交件
 
-1. 把整合分支最新的 tip 合進自己的分支：`git fetch origin && git merge origin/<整合分支>`。
+1. 把整合分支最新的 tip 合進自己的分支：`git fetch origin && git merge -m "<不含分支名、票號的英文訊息>" origin/<整合分支>`。一律帶 `-m`：git 預設的 merge 訊息會寫進分支名，分支名常含票號（理由見 [維護規則](${CLAUDE_PLUGIN_ROOT}/references/maintenance.md)「外洩檢查」）。
 2. **在本機跑這個 repo 的 CI 同一套指令**（照 CI workflow 檔裡實際跑的那幾條），把輸出留下來貼在回報。不能在本機跑的那一段，明說哪一段沒跑、為什麼。
 3. commit，`git push origin <分支>`（只推自己這一條）。
 4. 在票上留言（內文走 `--body-file`）：
@@ -68,7 +68,7 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
    - 範圍外的發現（只記下，不改）。
    - 最後一行署名：`— 🔨 施工｜<機器>｜<執行者>｜分支 <分支>`。執行者：自己是對話本身寫 `session <session id 前 8 碼>`；是被派出的子代理寫 `施工子代理 agent-<自己的 agent id 前 8 碼>@<派它的 session id 前 8 碼>`。格式以 labels.md 第三節為準；「不驗自己的票」就是比對執行者欄。
 5. 換狀態：施工中 → 待驗證（狀態標籤記法：`--add-label <待驗證標籤> --remove-label <施工中標籤>`；Project Status 記法把 Status 改成 repo 設定「Status 選項 ID」裡的 `待驗證`）。換手給另一台時，機器標籤跟著換成接手的那一台。
-   - **驗收由另一個 session 做**：這個 session 與它派出的子代理都不驗這張票（labels.md 第三節）。
+   - **驗收由另一個 session 做**：這個 session 與它派出的子代理都不驗這張票（labels.md 第三節）。不逐張驗：整批收齊後由另一個 session 跑 `review` 改動模式一次總驗收，通過後由指揮台拿掉 `待驗證`。
 6. **不開 PR**。合進整合分支由另派的合併者做；整合分支收齊後才開一個 PR。
 
 ## 7. 界線

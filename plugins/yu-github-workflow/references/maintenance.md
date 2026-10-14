@@ -18,7 +18,7 @@
 
 ## 整合 PR
 
-- 驗證等級一律 `重驗證-外審`：`main` 是所有機器的部署線，hook 會在每個對話執行。整段改動收齊後送換廠牌的外部審查，通過才開 PR。
+- 驗證等級一律 `重驗證-外審`：`main` 是所有機器的部署線，hook 會在每個對話執行。整段改動收齊後送換廠牌的外部審查（做不到時照 `review` 第 4 節的替代做法），通過、外審結論留在票上之後才開 PR。
 - 一律用 merge commit 合併，不用 squash、不用 rebase merge。其他地方用 SHA 固定連結指到施工分支的 commit，squash 會讓那些 SHA 不在 `main` 的歷史裡。
 - 公開 repo 的 PR 與 commit 訊息不寫私有 repo 的票號，所以不用 `Closes` 關私有票；合併後由指揮台逐張關。
 - 合併只由擁有者按。
@@ -27,6 +27,7 @@
 
 這是公開 repo，寫進來的檔與 commit 訊息只能有通用規則：不寫私有 repo 名、票號、人名、事件、本機路徑、內部識別字。作者信箱用 GitHub 的 noreply 信箱。
 
+- **merge commit 訊息不帶分支名**：合施工分支、整合分支的 `git merge` 一律帶 `-m "<不含分支名、票號的英文訊息>"`（跟上游的 `git merge upstream/main` 預設訊息只有上游的分支名，不在此限）。git 預設的訊息是 `Merge branch '<分支>' into <分支>`，分支名常含私有票號（例如整合分支的命名規則就帶 SPEC 編號），預設訊息會把它寫進公開歷史。施工者合整合分支（`implement` 第 6 節）、合併子代理合進整合分支（`implement-spec` 第 5 節）都照這條。
 - 推送前有本機 pre-push hook 掃描新增行、commit 訊息與作者信箱，命中就擋。不要用 `--no-verify` 繞過。
 - 只有裝了這支 hook 的機器才推 fork。
 - CI 端另有 `leak-scan` workflow（`.github/workflows/leak-scan.yml`），push 與 PR 都掃新增內容；關鍵詞清單放在 repo secret。它在推送**之後**才跑，命中時內容已經公開，只能事後偵測、補救；推送前擋下仍只靠本機 hook。
