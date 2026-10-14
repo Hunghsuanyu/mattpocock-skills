@@ -31,6 +31,12 @@
 # pattern equal to, or contained in, the owner name or noreply address does not hit there,
 # but still hits anywhere else; a pattern that reaches past the owner text (for example
 # owner/repo) hits. The same rule applies to the generic e-mail check.
+# Limit: when a hit lies inside an owner span the match is retried one character later, never
+# with a longer alternative from the same start. So a pattern that lists a shorter alternative
+# equal to the owner first (owner|owner/secret), or uses a lazy quantifier, can miss owner/secret.
+# A pattern that can match an empty string (a trailing "|", "a*") is refused when loaded; one
+# that matches an empty string only in some text (a bare word boundary, a lookaround) is refused
+# when that happens. Both exit 2 and name only the pattern line.
 set -uo pipefail
 
 SCANNER=''
@@ -83,6 +89,7 @@ for my $p (split /\n/, ($ENV{LEAK_PATTERNS} // '')) {
   my $re = eval { qr/$p/ };
   unless (defined $re) { print STDERR "leak-scan: pattern line $k does not compile\n"; exit 2; }
   if ($WARNED != $w0) { print STDERR "leak-scan: pattern line $k has a warning\n"; exit 2; }
+  if ('' =~ $re) { print STDERR "leak-scan: pattern line $k can match an empty string\n"; exit 2; }
   push @pat, [$k, $re];
 }
 unless (@pat) { print STDERR "leak-scan: LEAK_PATTERNS is empty or unreadable\n"; exit 2; }
@@ -109,6 +116,8 @@ while (my $l = <STDIN>) {
     my $q = quotemeta $s; while ($t =~ /$q/g) { push @own, [$-[0], $+[0]]; } }
   for my $pp (@pat) { my ($i, $re) = @$pp;
     while ($t =~ /$re/g) {
+      # a zero-length match (\b, lookaround) would never move past an owner span at the end
+      if ($-[0] == $+[0]) { print STDERR "leak-scan: pattern line $i matched an empty string\n"; exit 2; }
       if (inside(\@own, $-[0], $+[0])) { pos($t) = $-[0] + 1; next; }   # retry from the next char
       out($pos, $i); } }
   while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR || inside(\@own, $-[0], $+[0]); }

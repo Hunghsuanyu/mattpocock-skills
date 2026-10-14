@@ -31,6 +31,8 @@ owner-span-start-only	s/\$e <= \$_->\[1\]/$s < $_->[1]/	scan
 owner-no-span-skip	s/return 1 if \$s >= /return 0 if $s >= /	scan
 owner-drop-whole-record	s/if \(inside\(\\@own, \$-\[0\], \$\+\[0\]\)\)/if (@own)/	scan
 noreply-span-dropped	s/\$noreply, \$owner\)/$owner)/	scan
+empty-load-check	s/^  if \(.. =~ \$re\).*$//	scan
+zero-length-guard	s/^      if \(\$-\[0\] == \$\+\[0\]\).*$//	scan
 checkout-unpinned	s/actions\/checkout@[0-9a-f]{40}/actions\/checkout@v4/	wf
 delete-shares-group	s/^  group: .*$/  group: leak-scan-${{ github.ref }}/	wf
 push-before	s/head="\$AFTER"; base=""/head="$AFTER"; base="$BEFORE"/	wf'
@@ -142,7 +144,7 @@ chmod +x "$T/shim/git"
 run env PATH="$T/shim:$PATH" LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$BN"
 check 'still-binary diff => HIT pattern=binary' '[ "$RC" -eq 1 ] && has "pattern=binary"'
 
-# ---------- 5. LEAK_OWNER is removed from every field, names included ----------
+# ---------- 5. a hit inside LEAK_OWNER is dropped in every field, names included ----------
 g checkout -q -b owner "$U"
 echo 'o ZZCANARYZZ' > "$R/o.txt"; g add o.txt
 GIT_AUTHOR_NAME='OwnerQQ' GIT_COMMITTER_NAME='OwnerQQ' \
@@ -175,6 +177,19 @@ run "${ON[@]}" LEAK_PATTERNS='ownerqq' bash "$SCAN" text t <<< 'see ownerqq'
 check 'owner span is case-sensitive: other-case text still hits' '[ "$RC" -eq 1 ]'
 run "${ON[@]}" LEAK_PATTERNS="$(printf 'ZZCANARYZZ\nnerQ')" bash "$SCAN" commits "$R" "$U" "$OW"
 check 'commits: owner-substring pattern in author/committer name does not hit' '[ "$RC" -eq 1 ] && has "pattern=1" && lacks "pattern=2"'
+
+# ---------- 5d. a pattern that can match an empty string is refused ----------
+# Such a pattern used to loop forever once an owner span touched the end of a record.
+# Every run here goes through a 20 s alarm (perl alarm, rc 142), so a loop turns red instead of hanging.
+lim() { perl -e 'alarm shift; exec @ARGV' 20 "$@"; }
+run lim env LEAK_PATTERNS='foo|' bash "$SCAN" text t < /dev/null
+check 'empty-matching pattern refused when loaded, even with no input => rc 2, line named only' '[ "$RC" -eq 2 ] && has "pattern line 1 can match an empty string" && lacks foo'
+run lim env LEAK_PATTERNS="$(printf 'ZZCANARYZZ\na*')" LEAK_OWNER=OwnerQQ bash "$SCAN" text t <<< 'hello OwnerQQ'
+check 'second-line empty-matching pattern (a*) => rc 2, line 2 named' '[ "$RC" -eq 2 ] && has "pattern line 2 can match an empty string"'
+run lim env LEAK_PATTERNS='\b' LEAK_OWNER=OwnerQQ bash "$SCAN" text t <<< 'hello OwnerQQ'
+check 'zero-length match at run time (word boundary) next to the owner => rc 2, no loop' '[ "$RC" -eq 2 ] && has "pattern line 1 matched an empty string"'
+run lim env LEAK_PATTERNS='nerQ' LEAK_OWNER=OwnerQQ bash "$SCAN" text t <<< 'hello OwnerQQ'
+check 'control: same text and owner with a non-empty pattern ends clean' '[ "$RC" -eq 0 ]'
 
 # ---------- 5c. workflow pins and concurrency ----------
 check 'workflows pin actions/checkout to a full SHA' '! grep -hE "uses: *actions/checkout@" "$WF" "$ROOT/.github/workflows/plugin-tests.yml" | grep -vqE "@[0-9a-f]{40}( |$)"'
