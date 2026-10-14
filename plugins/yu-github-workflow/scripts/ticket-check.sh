@@ -21,6 +21,10 @@ TCK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 9
 # 「合併後還有步驟嗎」的唯一判法（與 pr-risk.sh 共用，不另寫一份 pattern）。
 # shellcheck source=lib/after-merge-step.sh
 . "${TCK_DIR}/lib/after-merge-step.sh" || exit 9
+# 錨點段怎麼讀、哪些連結算錨點、「- 無：<理由>」怎麼認（與 anchor-overlap.sh 共用，不另寫一份）。
+# shellcheck source=lib/anchor-links.sh
+. "${TCK_DIR}/lib/anchor-links.sh" || exit 9
+TCK_RAW_HOST='[Rr][Aa][Ww]\.[Gg][Ii][Tt][Hh][Uu][Bb][Uu][Ss][Ee][Rr][Cc][Oo][Nn][Tt][Ee][Nn][Tt]\.[Cc][Oo][Mm]'
 
 # ── 錨點檢查要不要跳過這張票（也是格 9「施工票」的範圍） ─────────────
 # 看標題的前綴，不看子字串：標題裡提到 SPEC 的施工票照查。
@@ -150,8 +154,10 @@ pr_closing_refs() {
   printf '%s\n' "$1" | awk -v me="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" '
     # fenced code block：三個以上的 ` 或 ~ 開頭的行開始，到「同一種字元、長度不少於開頭」的圍欄行結束
     # （圍欄行本身也不掃；四個反引號開的區塊，裡面的三個反引號不會關上它）。
+    # 反引號圍欄的資訊字串不能含反引號（CommonMark）：行首的 ```x``` 是行內的 code span，不是圍欄開頭。
     fence == "" && match($0, /^[ \t]*(```+|~~~+)/) {
-      f = substr($0, RSTART, RLENGTH); sub(/^[ \t]*/, "", f); fc = substr(f, 1, 1); fence = f; next }
+      f = substr($0, RSTART, RLENGTH); sub(/^[ \t]*/, "", f)
+      if (!(substr(f, 1, 1) == "`" && index(substr($0, RSTART + RLENGTH), "`") > 0)) { fc = substr(f, 1, 1); fence = f; next } }
     fence != "" {
       if (match($0, /^[ \t]*(```+|~~~+)[ \t]*$/)) {
         g = substr($0, RSTART, RLENGTH); gsub(/[ \t]/, "", g)
@@ -196,9 +202,22 @@ _executor() {  # 署名行 ⇒ 印「agent <id> <session>」或「session <id> <
   fi
   return 0
 }
-# 署名行前面的 markdown 修飾（空白、引用的 `>`、粗體斜體的 `*`／`_`）先去掉再認。
+# 署名行前面的 markdown 修飾（空白、引用的 `>`、粗體斜體的 `*`／`_`、清單符號 `- `／`+ `、HTML 標籤如 `<sub>`）先去掉再認；
+# emoji 與角色之間、破折號與 emoji 之間漏了空白（`🔍驗證`、`—🔨 施工`）補回來再認。
 # 去掉之後仍不是以署名開頭、但行內有「🔍 驗證」的，算一則讀不出執行者的驗證署名（不當成沒有驗證署名）。
-_sig_strip() { local x="$1"; while :; do case "$x" in [[:space:]\>\*_]*) x="${x#?}" ;; *) break ;; esac; done; printf '%s' "$x"; }
+_sig_strip() {
+  local x="$1" tag='^<[A-Za-z][A-Za-z0-9]*>'
+  while :; do
+    case "$x" in
+      [[:space:]\>\*_]*) x="${x#?}" ;;
+      [-+][[:space:]]*)  x="${x#?}" ;;
+      '<'*) [[ "$x" =~ $tag ]] || break; x="${x#"${BASH_REMATCH[0]}"}" ;;
+      *) break ;;
+    esac
+  done
+  x="${x//🔍驗證/🔍 驗證}"; x="${x//🔨施工/🔨 施工}"; x="${x/#—🔍/— 🔍}"; x="${x/#—🔨/— 🔨}"
+  printf '%s' "$x"
+}
 self_verify_verdict() {
   local line e builders=() verifiers=() b v bk bi bs vk vi vs nv=0 unread=''
   while IFS= read -r line; do
@@ -529,25 +548,39 @@ lbad=0; lunk=0; lopen=0; lclosed=0; lother=0; oopen=0
       b9=$((b9+1))
     fi
 
-    # 錨點段：`##` 開頭那行裡有「錨點」（emoji／括號註記都放行）。
-    anc=$(awk '/^## /{f=0} /^## .*錨點/{f=1;next} f' "$tmp")
+    # 錨點段與連結的判法：lib/anchor-links.sh（anchor_section／anchor_parse，與 anchor-overlap.sh 同一份）。
+    anc=$(anchor_section < "$tmp")
     if [ -z "$anc" ]; then
       printf 'NG %-14s#%-3s 沒有「## 錨點」段 — %s\n' "$short" "$n" "$title"
       bad=$((bad+1)); continue
     fi
+    arc=0
+    recs=$(printf '%s\n' "$anc" | anchor_parse 2>"$errf") || arc=$?
+    if [ "$arc" != 0 ]; then
+      printf '?? %-14s#%-3s 錨點段解析失敗，錨點不查（%s） — %s\n' "$short" "$n" "$(tr '\n' ' ' <"$errf")" "$title"
+      lunk=$((lunk+1)); continue
+    fi
+    # 形狀（只數 40 碼十六進位接在 blob／tree／blame／raw 或 raw 網域後面）與抽得出網址的條數分開數，對不上就 !!。
     # 先 -o 攤成一行一條再數行（`grep -c` 數的是行數，一行兩個連結只算 1）。
     # grep 沒命中回 1，set -e ＋ pipefail 會讓整支靜靜死掉——`|| true` 是必須的。
+    #   SHA 只認小寫十六進位（大寫的不是 GitHub 印出來的 SHA）；raw 網域的 host 不分大小寫，照 anchor_parse。
     sha=$(printf '%s' "$anc" \
-      | { grep -Eo '/(blob|tree)/[0-9a-f]{40}([^0-9a-fA-F]|$)' || true; } \
+      | { grep -Eo "(/(blob|tree|blame|raw)/|${TCK_RAW_HOST}/[^/[:space:]]+/[^/[:space:]]+/)[0-9a-f]{40}([^0-9a-fA-F]|\$)" || true; } \
       | { grep -c . || true; })
+    nopin=$(printf '%s\n' "$recs" | awk -F'\t' '$1 == "B" { print $2 }')
+    none=$(printf '%s\n' "$recs" | awk -F'\t' '$1 == "N" { print $2 "\t" $3 }')
     if [ "$sha" = 0 ]; then
-      # 沒有程式碼錨點的票（開票、決定、查證…）在錨點段明寫一行「- 無：<理由>」（半形或全形冒號），理由不可空。
-      none=$(printf '%s\n' "$anc" | awk '!d && /^[ \t]*[-*][ \t]+無[ \t]*(:|：)/ {
-        v = $0; sub(/^[ \t]*[-*][ \t]+無[ \t]*(:|：)/, "", v); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
-        print (v == "" ? "EMPTY" : "R " v); d = 1 }')
+      # 沒有程式碼錨點的票（開票、決定、查證…）在錨點段明寫一行「- 無：<理由>」；理由空白不算。
+      # 寫了「無」又放了沒釘 SHA 的檔案連結 ⇒ NG（那條連結會跟著分支變，不是錨點）。
       case "$none" in
-        'R '*) printf '   %-14s#%-3s 錨點 無：%s\n' "$short" "$n" "${none#R }"; continue ;;
-        EMPTY) printf 'NG %-14s#%-3s 錨點寫了「無」但沒寫理由（寫成「- 無：<理由>」） — %s\n' "$short" "$n" "$title"
+        R$'\t'*)
+          if [ -n "$nopin" ]; then
+            printf 'NG %-14s#%-3s 錨點寫了「無」又放了沒釘 SHA 的檔案連結（改成 SHA 固定連結，或拿掉）：%s — %s\n' \
+              "$short" "$n" "$(printf '%s\n' "$nopin" | paste -sd ' ' -)" "$title"
+            bad=$((bad+1)); continue
+          fi
+          printf '   %-14s#%-3s 錨點 無：%s\n' "$short" "$n" "${none#R$'\t'}"; continue ;;
+        EMPTY*) printf 'NG %-14s#%-3s 錨點寫了「無」但沒寫理由（寫成「- 無：<理由>」） — %s\n' "$short" "$n" "$title"
                bad=$((bad+1)); continue ;;
       esac
       printf 'NG %-14s#%-3s 錨點沒有 SHA 固定連結 — %s\n' "$short" "$n" "$title"
@@ -556,24 +589,25 @@ lbad=0; lunk=0; lopen=0; lclosed=0; lother=0; oopen=0
 
     # ── 形狀對不代表那顆存在：逐顆問 GitHub ──
     # 去重前後分開數：同一顆 SHA 的不同檔只問一次，但對照組要用去重前的條數。
-    urls_raw=$(printf '%s' "$anc" \
-      | { grep -Eo 'https://github\.com/[^/ )]+/[^/ )]+/(blob|tree)/[0-9a-f]{40}([^0-9a-fA-F]|$)' || true; } \
-      | sed -E 's/[^0-9a-fA-F]$//')
+    urls_raw=$(printf '%s\n' "$recs" | awk -F'\t' '$1 == "F" { print tolower($3 "/" $4) "@" $5 }')
     urls=$(printf '%s' "$urls_raw" | sort -u)
     # ⚠️ 不可以寫成 `[ -n "$urls" ] && nurl=$(…)`：set -e 之下 urls 為空時整式回 1，整支靜靜終止。
     nurl=0
     if [ -n "$urls_raw" ]; then nurl=$(printf '%s\n' "$urls_raw" | { grep -c . || true; }); fi
+    # 有 SHA 連結、又有沒釘 SHA 的檔案連結：那幾條沒被驗（anchor-overlap 對同一張票印 UNKNOWN）。
+    if [ -n "$nopin" ]; then
+      while IFS= read -r u; do
+        printf '!! %-14s#%-3s 錨點有沒釘 SHA 的檔案連結，沒被驗存在：%s\n' "$short" "$n" "$u"
+      done <<<"$nopin"
+    fi
 
     miss=0; unk=0
     if [ -n "$urls" ]; then
       while IFS= read -r url; do
         [ -n "$url" ] || continue
-        rest="${url#https://github.com/}"
-        o="${rest%%/*}";  rest="${rest#*/}"
-        r="${rest%%/*}";  rest="${rest#*/}"
-        rest="${rest#*/}"                      # 去掉 blob|tree
-        s40="${rest%%/*}"
-        key="$o/$r@$s40"
+        o="${url%%/*}"; rest="${url#*/}"       # url＝owner/repo@SHA
+        r="${rest%%@*}"; s40="${rest#*@}"
+        key="$url"
         case " $seen_ok " in *" $key "*) continue ;; esac
         case " $seen_ng " in *" $key "*) miss=$((miss+1)); continue ;; esac
 

@@ -10,11 +10,15 @@
 #      `/blame/`、`/raw/` 與 `https://raw.githubusercontent.com/<owner>/<repo>/<40 碼 SHA>/<路徑>` 也算檔；
 #      host 不分大小寫、可帶 `www.`。
 #      同一個檔＝同一個 owner/repo（不分大小寫）＋同一個路徑；SHA 不同也算同一個檔，`?plain=1` 與 `#L…` 不算進路徑。
-#      連結結尾黏著的全形／半形標點、引號、波浪號、刪節號、反引號、句點、Markdown 強調（`*`、`_`）剝掉；
-#      最後一段是「檔名.副檔名」而後面直接接中文（例如 `a.md的說明`）⇒ 砍在副檔名後面
+#      連結結尾黏著的全形／半形標點、引號、波浪號、刪節號、反引號、`|`、句點、`:行號`、Markdown 強調剝掉
+#      （結尾的 `_` 只在連結前面有 `_` 強調開頭時才剝，檔名 `foo_` 不剝）；
+#      最後一段後面直接接中文（`a.md的說明`、`README的說明`）⇒ 砍掉中文
 #      （中文後面還有副檔名的，例如 `v1.2版說明.md`，當成檔名本身，不砍）。百分比編碼解回來再比；比對用位元組、不吃語系排序。
 #      錨點段裡指向檔案（上面幾種）卻抽不出 40 碼 SHA 的連結（例如 `blob/main/…`、`refs/heads/main/…`）⇒ 那張票印 `UNKNOWN`，不略過；
 #      不指向檔案的 github 連結（issue、pull、commit、留言）不是錨點，直接略過。
+#      沒有任何檔案連結、明寫一行「- 無：<理由>」的票（只在 repo 外操作、只做決定）⇒ 錨點檔清單為空，不與任何票重疊；
+#      理由空白（含全形空白、只有 `-`）、或那行在程式碼圍欄裡 ⇒ 照樣 UNKNOWN。
+#      上面這些判法（連結怎麼認、結尾怎麼剝、「無」怎麼認）只寫在 lib/anchor-links.sh，與 ticket-check.sh 共用；細則見那一檔。
 #   2. 兩兩比對交集：同一個檔，或一邊是目錄、另一邊是目錄底下的檔（或子目錄）。沒有交集 ⇒ 不印。
 #   3. 有交集的一對，查兩個方向的 `issues/<n>/dependencies/blocked_by`（只看直接的擋，不追鏈）：
 #      任一方向有擋 ⇒ `OK`；兩個方向都沒有 ⇒ 每個共用檔印一行 `NG <a> <b> <檔>`。
@@ -46,39 +50,10 @@ AOV_TMP=$(mktemp -d) || { echo "UNKNOWN - - 建不了暫存目錄"; finish 2; }
 trap 'rm -rf "$AOV_TMP"' EXIT
 errf="$AOV_TMP/err"
 
-# 錨點段 → 一行一個 `owner/repo/路徑`（owner/repo 小寫；目錄結尾加 `/`）；抽不出 SHA 的 github 連結寫進 argv[1]。
-AOV_PY=''
-IFS= read -r -d '' AOV_PY <<'PY' || true
-import re, sys, urllib.parse
-bad = open(sys.argv[1], "w", encoding="utf-8")
-PUNCT = "，。、；：！？（）「」『』【】《》〈〉“”‘’～…"
-TRAIL = ".,;:!?*_~"
-url_re = re.compile(r"https?://(?:www\.)?(github\.com|raw\.githubusercontent\.com)/([^\s()\[\]<>\"'`" + PUNCT + "]+)", re.I)
-# 最後一段「檔名.副檔名」後面直接接中文、而中文後面沒有再一個「.」⇒ 中文是正文，不是檔名
-cjk_tail = re.compile(r"^(.*\.[A-Za-z0-9]+)[^\x00-\x7f][^./]*$")
-out = []
-for mo in url_re.finditer(sys.stdin.buffer.read().decode("utf-8", "replace")):
-    host, tail = mo.group(1).lower(), mo.group(2).rstrip(TRAIL)
-    head, sep, last = re.split(r"[?#]", tail, maxsplit=1)[0].rpartition("/")
-    c = cjk_tail.match(last)
-    if c:
-        tail = head + sep + c.group(1)
-    u = mo.group(0)[:mo.start(2) - mo.start(0)] + tail
-    path = urllib.parse.unquote(re.split(r"[?#]", tail, maxsplit=1)[0])
-    if host == "raw.githubusercontent.com":
-        path = re.sub(r"^([^/]+/[^/]+)/", r"\1/blob/", path)  # raw 網域沒有 blob 這一段：補上，照同一套規則
-    if not re.match(r"[^/]+/[^/]+/(blob|tree|blame|raw)/", path):
-        continue  # 不是指向檔案的連結（issue、pull、commit、留言）：不是錨點，略過
-    m = re.match(r"([^/]+)/([^/]+)/(blob|tree|blame|raw)/([0-9a-f]{40})(?:/(.*))?$", path)
-    rest = ((m.group(5) or "").rstrip("/")) if m else ""
-    if not m or (m.group(3) != "tree" and not rest):
-        bad.write(u + "\n"); continue
-    key = (m.group(1) + "/" + m.group(2)).lower() + "/" + rest
-    if m.group(3) == "tree":
-        key = key.rstrip("/") + "/"
-    out.append(key + "\n")
-sys.stdout.buffer.write("".join(out).encode("utf-8"))
-PY
+# 錨點段怎麼讀、哪些連結算、「- 無：<理由>」怎麼認：lib/anchor-links.sh（與 ticket-check.sh 共用同一份判法）。
+AOV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || { echo "UNKNOWN - - 找不到腳本目錄"; finish 2; }
+# shellcheck source=lib/anchor-links.sh
+. "${AOV_DIR}/lib/anchor-links.sh" || { echo "UNKNOWN - - 讀不到 lib/anchor-links.sh"; finish 2; }
 
 # ── 每張票的錨點檔清單：$AOV_TMP/files-<n>（排序去重）；讀不到或解析失敗 ⇒ $AOV_TMP/why-<n> 寫原因；
 #    抽不出 SHA 的連結 ⇒ $AOV_TMP/bad-<n>（照樣比對其他連結，但這張票印 UNKNOWN）──
@@ -88,16 +63,23 @@ for n in "${nums[@]}"; do
   if [ "$arc" != 0 ]; then
     printf '讀不到內文（%s）' "$(tr '\n' ' ' <"$errf")" > "$AOV_TMP/why-$n"; continue
   fi
-  anc=$(printf '%s\n' "$body" | tr -d '\r' | awk '/^## /{f=0} /^## .*錨點/{f=1;next} f')
+  anc=$(printf '%s\n' "$body" | anchor_section)
   if [ -z "$anc" ]; then
     printf '沒有「## 錨點」段' > "$AOV_TMP/why-$n"; continue
   fi
-  if ! printf '%s\n' "$anc" | python3 -I -c "$AOV_PY" "$AOV_TMP/bad-$n" > "$AOV_TMP/raw-$n" 2>"$errf"; then
+  if ! printf '%s\n' "$anc" | anchor_parse > "$AOV_TMP/raw-$n" 2>"$errf"; then
     printf '錨點段解析失敗（%s）' "$(tr '\n' ' ' <"$errf")" > "$AOV_TMP/why-$n"; continue
   fi
-  LC_ALL=C sort -u "$AOV_TMP/raw-$n" > "$AOV_TMP/files-$n"
+  awk -F'\t' '$1 == "F" { print $6 }' "$AOV_TMP/raw-$n" | LC_ALL=C sort -u > "$AOV_TMP/files-$n"
+  awk -F'\t' '$1 == "B" { print $2 }' "$AOV_TMP/raw-$n" > "$AOV_TMP/bad-$n"
+  none=$(awk -F'\t' '$1 == "N" { print $2 }' "$AOV_TMP/raw-$n")
+  # 沒有任何檔案連結：明寫「- 無：<理由>」＝錨點檔清單為空（不與任何票重疊）；理由空白或沒寫「無」⇒ 讀不到
   if [ ! -s "$AOV_TMP/files-$n" ] && [ ! -s "$AOV_TMP/bad-$n" ]; then
-    printf '錨點段沒有 blob/<40 碼 SHA>/<路徑> 連結' > "$AOV_TMP/why-$n"
+    case "$none" in
+      R) ;;
+      EMPTY) printf '錨點寫了「無」但沒寫理由（寫成「- 無：<理由>」）' > "$AOV_TMP/why-$n" ;;
+      *) printf '錨點段沒有 blob/<40 碼 SHA>/<路徑> 連結，也沒有「- 無：<理由>」' > "$AOV_TMP/why-$n" ;;
+    esac
   fi
 done
 
