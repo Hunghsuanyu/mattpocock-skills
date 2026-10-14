@@ -1,2 +1,16 @@
 s/issue\[\[:space:]]+create/issue[[:space:]]+crate/	scripts/lib/hook-common.sh
 # 第一行：把「gh issue create」的比對改錯一字（test-hooks.sh 的開票命中與開票自檢案例必須紅）。只跑第一行。第一欄是 sed 指令、第二欄是被突變的檔（相對 plugin 根目錄），以 TAB 分隔。
+# 第 3 行起：開票自檢只查剛開的票、沒總結＝沒跑完、判法補 new／-R／反斜線換行、--help 與 cat 不算、Closes 回查用 pr_closing_refs，各一發（test-hooks.sh 對應案例必須紅）。
+s/issue\[\[:space:]]+(create|new)/issue[[:space:]]+(create)/	scripts/lib/hook-common.sh
+s/(-R|--repo)/(--nope)/	scripts/lib/hook-common.sh
+s/printf '%s' "\${1\/\/"\${bs}"\/ }"/printf '%s' "$1"/	scripts/lib/hook-common.sh
+s/\[\[ " \${seg} " =~ \${HC_RE_HELP} ]] || return 0/return 0/	scripts/lib/hook-common.sh
+s/^HC_RE_PR_OPEN_CMD="(^|\[;/HC_RE_PR_OPEN_CMD="(^|[[:space:];/	scripts/lib/hook-common.sh
+s/ | \*'issue new'\* | / | /	scripts/lib/hook-common.sh
+s/在 SPEC 留言，由指揮台寫進「尚未定義」/記到 SPEC 的「尚未定義」/	scripts/hook-pre-bash.sh
+s/grep -Ex '/grep -Eo '/	scripts/hook-post-bash.sh
+s/if ! printf '%s\\n' "\${out}" | grep -qx -- '--'; then/if false; then/	scripts/hook-post-bash.sh
+s/\[ "\${rc}" -eq 1 ] || msg+=/true || msg+=/	scripts/hook-post-bash.sh
+s/if ! chk=/if false \&\& chk=/	scripts/hook-post-bash.sh
+s/pr_closing_refs "\${body}" "\${repo}"/printf '%s' "${body}" | grep -Eo '#[0-9]+' | tr -d '#'/	scripts/hook-post-bash.sh
+s/| awk -v p="\${lrepo}#" 'index(\$0, p) == 1' |/|/	scripts/hook-post-bash.sh
