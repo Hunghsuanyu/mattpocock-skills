@@ -14,8 +14,9 @@ permissions:
 
 concurrency:
   group: leak-scan-${{ github.ref }}
-  # PR runs rescan the whole PR, so a newer run fully covers a cancelled one.
-  # Push runs only scan before..after, so they must not be cancelled.
+  # Every run rescans everything its head adds over upstream main (the whole PR, or the whole
+  # pushed branch), so a newer run covers a queued run that concurrency replaced.
+  # In-progress push runs are still left to finish.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -40,7 +41,6 @@ jobs:
         env:
           LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
           EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.event.after }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -50,9 +50,9 @@ jobs:
           if [ "$EVENT" = pull_request ]; then
             head="$PR_HEAD"; base="$PR_BASE"
           else
-            head="$AFTER"; base="$BEFORE"
-            # New branch (all-zero before) or a before we do not have: scan everything not in upstream.
-            case "$base" in *[!0]*) git cat-file -e "${base}^{commit}" || base="" ;; *) base="" ;; esac
+            # Push: every commit on the pushed head that upstream main lacks, not just
+            # before..after. A push whose run was cancelled while queued is covered by the next.
+            head="$AFTER"; base=""
           fi
           bash .github/scripts/leak-scan.sh commits . "$up" "$head" ${base:+"$base"}
 

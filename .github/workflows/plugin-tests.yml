@@ -1,16 +1,23 @@
 name: plugin-tests
 
-# Runs the yu-github-workflow plugin's own tests. Every test swaps gh for a
-# fake program on PATH, so nothing here touches a real repo or needs a token.
+# Runs the yu-github-workflow plugin's own tests and the leak-scan tests. Plugin tests swap
+# gh for a fake program on PATH; leak-scan tests use throwaway local git repos and made-up
+# patterns. Nothing here touches a real repo or needs a token.
 
 on:
   push:
     paths:
       - "plugins/yu-github-workflow/**"
+      - ".github/scripts/leak-scan.sh"
+      - ".github/scripts/tests/**"
+      - ".github/workflows/leak-scan.yml"
       - ".github/workflows/plugin-tests.yml"
   pull_request:
     paths:
       - "plugins/yu-github-workflow/**"
+      - ".github/scripts/leak-scan.sh"
+      - ".github/scripts/tests/**"
+      - ".github/workflows/leak-scan.yml"
       - ".github/workflows/plugin-tests.yml"
 
 permissions:
@@ -36,3 +43,7 @@ jobs:
             echo "::endgroup::"
           done
           exit "$rc"
+
+      - name: Run the leak-scan tests
+        if: always()
+        run: bash .github/scripts/tests/test-leak-scan.sh
