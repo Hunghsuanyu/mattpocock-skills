@@ -84,7 +84,8 @@ NL='
 '
 for c in 'gh issue create --title t --body-file b.md' "echo 'gh issue create dry-text'" 'cd x && gh  issue  create -R o/r' \
   'gh issue new --title t' 'gh -R o/r issue create --title t' 'gh --repo o/r issue create --title t' 'gh --repo=o/r issue create' \
-  "gh issue \\${NL}  create --title t"; do
+  "gh issue \\${NL}  create --title t" 'gh issue -R o/r create --title t' 'gh issue --repo=o/r new --title t' \
+  'gh issue create --title "改 -h 參數" --body-file b' 'gh issue create --title t --body "看 --help 說明"'; do
   hook pre "${c}"
   verdict "pre 開票命中：${c}" has '開票提醒'
 done
@@ -99,7 +100,10 @@ verdict 'pre 開票：第一個字詞是環境變數設定時只記名稱、不�
 
 # ══ PreToolUse：開 PR（gh pr create 或 pr-open.sh） ══
 for c in 'gh pr create --base main --body-file b.md' 'bash plugins/x/scripts/pr-open.sh o/r main feat/x t.txt b.txt' "echo 'bash ./pr-open.sh o/r main h t b'" \
-  'gh pr new --base main' 'gh -R o/r pr create --base main' './scripts/pr-open.sh o/r main feat/x t b' 'cd x && FOO=1 scripts/pr-open.sh o/r main h t b'; do
+  'gh pr new --base main' 'gh -R o/r pr create --base main' './scripts/pr-open.sh o/r main feat/x t b' 'cd x && FOO=1 scripts/pr-open.sh o/r main h t b' \
+  '"${CLAUDE_PLUGIN_ROOT}/scripts/pr-open.sh" o/r main feat/x t b' "'/u/x/scripts/pr-open.sh' o/r main h t b" \
+  'bash "${CLAUDE_PLUGIN_ROOT}/scripts/pr-open.sh" o/r main h t b' 'cd x && "/u/x/scripts/pr-open.sh" o/r main h t b' \
+  'gh pr --repo o/r create --base main' 'gh pr create --title "改 -h 參數" --body-file b'; do
   hook pre "${c}"
   verdict "pre 開 PR 命中：${c}" has '開 PR 提醒'
 done
@@ -109,7 +113,8 @@ verdict 'pre 開 PR：帳本記一行、第一個字詞是 bash' c_ledger_pr
 
 # ══ PreToolUse：不該命中 ══
 for c in 'gh issue list' 'gh pr view 3' "echo 'gh issue created'" 'gh issue createx' 'mygh issue create' 'gh pr created' 'cat pr-open.sh.bak' 'ls' \
-  'cat scripts/pr-open.sh' 'git diff -- scripts/pr-open.sh' 'vim scripts/pr-open.sh' 'gh pr create --help' 'gh issue create -h' 'gh pr new --help'; do
+  'cat scripts/pr-open.sh' 'git diff -- scripts/pr-open.sh' 'vim scripts/pr-open.sh' 'gh pr create --help' 'gh issue create -h' 'gh pr new --help' \
+  'bash tests/test-pr-open.sh' 'bash -n scripts/pr-open.sh' 'cat "scripts/pr-open.sh"' 'gh issue -R o/r create --help' "vim 'scripts/pr-open.sh'"; do
   hook pre "${c}"
   c_none() { silent && [ ! -s "${LEDGER}" ]; }
   verdict "pre 不命中：${c}" c_none
@@ -155,6 +160,11 @@ printf '%s\n' "NG repo-d        ${H}12  標籤 格1 缺 類型（一般票） �
 hook post 'gh issue create --title t' "$(create_out --title t)"
 c_label_only() { has '標籤 NG：' && ! has '錨點／做完能展示什麼 NG：'; }
 verdict '開票自檢：只有標籤 NG 時不講錨點' c_label_only
+# 格 5～8 的 NG 不是「補掛類型／優先／驗證」
+printf '%s\n' "NG repo-d        ${H}12  標籤 格5 驗證者 session a 與施工者 session a 是同一個對話（session a） — 某票" '--' 'x' > "${TC_OUT}"
+hook post 'gh issue create --title t' "$(create_out --title t)"
+c_cell_ng() { has '格5 驗證者' && has '格 3～8 NG：' && ! has '標籤 NG：' && ! has '錨點／做完能展示什麼 NG：'; }
+verdict '開票自檢：格 5 的 NG 不歸成補掛類型／優先／驗證' c_cell_ng
 # 自檢沒印 -- 總結＝沒跑完：明講，不當成 rc=1 的 NG
 printf '%s\n' "NG repo-d        ${H}12  標籤 格1 缺 類型（一般票） — 某票" 'gh: HTTP 502' > "${TC_OUT}"
 hook post 'gh issue create --title t' "$(create_out --title t)"
@@ -166,6 +176,25 @@ hook post 'gh issue create --title t' "$(create_out --title t)"
 c_rc3() { has '退出碼 3' && has '退出碼不是 0／1'; }
 verdict '開票自檢：有總結但退出碼 3 ⇒ 警告' c_rc3
 TC_RC=0
+# 退出碼 0 但有 ?? ⇒ 不寫「全過」，講有幾處讀不到
+printf '%s\n' "?? repo-d        ${H}12  格5 問不到留言（HTTP 502）" "?? repo-d        問不到開著的票內文，錨點、格 7、格 9 不查（x）" '--' 'x' > "${TC_OUT}"
+hook post 'gh issue create --title t' "$(create_out --title t)"
+c_unk() { has '沒有 NG，但有 2 處讀不到' && ! has '全過'; }
+verdict '開票自檢：rc=0 但有 ?? ⇒ 不寫全過、講幾處讀不到' c_unk
+printf '%s\n' "   repo-d        ${H}12  標籤 OK（一般票）" '--' 'x' > "${TC_OUT}"
+# 同一次 Bash 裡別的指令也印了整行的票網址 ⇒ 分不出哪張是剛開的、不跑
+hook post 'gh issue view 3 -R own-x/repo-y --json url -q .url && gh issue create --title t' \
+  "https://github.com/own-x/repo-y/issues/3${NL}$(create_out --title t)"
+c_other_url() { [ "$(calls "${TC_LOG}")" -eq 0 ] && has '開票自檢未執行' && has '分不出哪張是剛開的'; }
+verdict '開票自檢：別的指令也印了整行票網址 ⇒ 不跑、明講' c_other_url
+# ⬛ 對照：兩次開票、兩行網址 ⇒ 兩張都查；迴圈裡開票 ⇒ 網址比指令裡的開票次數多也照查
+hook post 'gh issue create --title a && gh issue create -R own-c/repo-d --title b' \
+  "$(create_out --title a)${NL}https://github.com/own-c/repo-d/issues/13"
+c_two() { c_called 'own-c/repo-d 12 13'; }
+verdict '開票自檢：⬛ 開兩次、兩行網址 ⇒ 兩張都查' c_two
+hook post 'for t in a b; do gh issue create --title "$t"; done' \
+  "$(create_out --title a)${NL}https://github.com/own-c/repo-d/issues/13"
+verdict '開票自檢：⬛ 迴圈裡開票 ⇒ 兩張都查' c_two
 hook post 'gh issue create --title t' "$(create_out --title t)"
 c_ledger_post() { grep -qE $'\tpost-issue-create\tgh$' "${LEDGER}"; }
 verdict '開票自檢：帳本記一行' c_ledger_post
