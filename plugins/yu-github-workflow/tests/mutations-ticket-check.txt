@@ -22,3 +22,4 @@ s/\*'HTTP 422'\*|\*'No commit found'\*)/*'HTTP 404'*|*'HTTP 422'*|*'No commit fo
 s/length(g) >= length(fence)/1/
 s/sub(\/\^https:\\\/\\\/github\\\.com\\\/\/, "", q); //
 s/v5="UNKNOWN 問不到留言/v5="OK 問不到留言/
+s/^    lunk=\$((lunk+unk)) /    : /

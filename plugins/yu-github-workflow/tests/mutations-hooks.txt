@@ -24,3 +24,6 @@ s/if \[ "\${rc}" -eq 0 \] && \[ "\${nunk}" -gt 0 \]; then/if false; then/	script
 s/if \[ "\${nurl}" -gt "\${ncreate}" \] && ! hc_has_loop/if false \&\& ! hc_has_loop/	scripts/hook-post-bash.sh
 s/ && ! hc_has_loop "\${HC_CMD}"; then/; then/	scripts/hook-post-bash.sh
 s/grep -E '\^NG \.\* 標籤 格\[12\] '/grep -E '^NG .* 標籤 格[0-9] '/	scripts/hook-post-bash.sh
+# 第 28 行起（第 2 輪補）：PostToolUseFailure 認得失敗事件、改讀 error 當輸出，各一發。
+s/PostToolUseFailure) HC_FAILED=1 ;;/PostToolUseFailure) ;;/	scripts/lib/hook-common.sh
+s/if .tool_response == null then (.error \/\/ "" | tostring)/if false then ""/	scripts/lib/hook-common.sh

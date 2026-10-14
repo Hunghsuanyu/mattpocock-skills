@@ -474,6 +474,7 @@ want_main 'SHA 422 ⇒ 不存在、rc=1' "$([ "$RC" = 1 ] && grep -q "^NG .*${H}
 echo 404 > "$FQ/commit-$SHA"
 run_main "$FQ"
 want_main 'SHA 404 ⇒ ?? 問不到、不判不存在、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*問不到 example-org/app-one@" "$T/out" && ! grep -q '^NG' "$T/out"; echo $?)"
+want_main 'SHA 404 ⇒ 總結的「問不到」算進這一處' "$(has '問不到 1 處'; echo $?)"
 
 # ── 錨點「無」：錨點段明寫一行「- 無：<理由>」⇒ OK、印出理由；理由空 ⇒ NG；完全沒有錨點段照樣 NG ──
 FW="$T/fx-w"; mkfx "$FW"; cfg_labels "$FW" '機器A,機器B'

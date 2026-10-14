@@ -608,6 +608,7 @@ EOF
         "$short" "$n" "$sha" "$nurl" "$((sha-nurl))"
     fi
 
+    lunk=$((lunk+unk))   # 錨點 SHA 問不到的也算進總結的「問不到 N 處」
     if [ "$miss" -gt 0 ]; then
       bad=$((bad+1))
     else

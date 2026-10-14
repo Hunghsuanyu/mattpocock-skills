@@ -195,6 +195,26 @@ verdict '開票自檢：⬛ 開兩次、兩行網址 ⇒ 兩張都查' c_two
 hook post 'for t in a b; do gh issue create --title "$t"; done' \
   "$(create_out --title a)${NL}https://github.com/own-c/repo-d/issues/13"
 verdict '開票自檢：⬛ 迴圈裡開票 ⇒ 兩張都查' c_two
+# 指令整體失敗（PostToolUseFailure）：payload 照實測形狀（沒有 tool_response，輸出在頂層 error）
+hookf() { # hookf <指令> <error 欄>
+  : > "${FAKE_LOG}"; : > "${TC_LOG}"; : > "${LEDGER}"
+  jq -n --arg c "$1" --arg e "$2" \
+    '{hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: {command: $c}, error: $e, is_interrupt: false}' \
+    | bash "${POST}" > "${T}/raw" 2> "${T}/err"; rc=$?
+  out=''
+  if [ -s "${T}/raw" ]; then out="$(jq -r '.hookSpecificOutput.additionalContext' "${T}/raw" 2>&1)"; fi
+}
+hookf 'gh issue create --title t && gh issue edit 12 --add-label x' "Exit code 1${NL}$(create_out --title t)${NL}GraphQL: label not found"
+c_fail_url() { c_called 'own-c/repo-d 12' && has '指令整體失敗，但票已開' && [ "$(jq -r '.hookSpecificOutput.hookEventName' "${T}/raw")" = PostToolUseFailure ]; }
+verdict '指令整體失敗、輸出裡有票網址 ⇒ 照樣自檢、開頭註明票已開' c_fail_url
+FAKE_CREATE=fail
+hookf 'gh issue create -R own-a/repo-b --title t' "Exit code 1${NL}$(create_out -R own-a/repo-b --title t)"
+c_fail_nourl() { c_not_run && ! has '指令整體失敗'; }
+verdict '指令整體失敗、沒有票網址 ⇒ 照「未執行」提示' c_fail_nourl
+FAKE_CREATE=ok
+hook post 'gh issue create --title t' "$(create_out --title t)"
+c_ok_not_failed() { c_called 'own-c/repo-d 12' && ! has '指令整體失敗' && [ "$(jq -r '.hookSpecificOutput.hookEventName' "${T}/raw")" = PostToolUse ]; }
+verdict '⬛ 指令成功 ⇒ 不註明失敗、事件名 PostToolUse' c_ok_not_failed
 hook post 'gh issue create --title t' "$(create_out --title t)"
 c_ledger_post() { grep -qE $'\tpost-issue-create\tgh$' "${LEDGER}"; }
 verdict '開票自檢：帳本記一行' c_ledger_post

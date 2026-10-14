@@ -52,7 +52,9 @@ hc_is_pr_create() {
   hc_gh_hit "${HC_RE_PR}" "${c}" || [[ "${c}" =~ ${HC_RE_PR_OPEN_RUN} ]] || [[ "${c}" =~ ${HC_RE_PR_OPEN_CMD} ]]
 }
 
-# 讀標準輸入的 hook JSON，設 HC_CMD（指令字串）與 HC_OUT（工具輸出：stdout＋stderr）。
+# 讀標準輸入的 hook JSON，設 HC_CMD（指令字串）、HC_OUT（工具輸出：stdout＋stderr）、HC_FAILED（1＝指令整體失敗）。
+# 指令退出碼非 0 時 Claude Code 不發 PostToolUse、改發 PostToolUseFailure：沒有 tool_response，
+#   輸出在頂層 error（實測 2.1.296：`"Exit code 1\n<輸出>"`）⇒ 改讀 error 當工具輸出。
 # 沒有 jq：只在原文看起來像開票／開 PR 時印一行「沒跑」，其他指令照常不出聲。回 1＝不要往下做。
 hc_read() {
   local payload
@@ -65,9 +67,12 @@ hc_read() {
     return 1
   fi
   HC_CMD="$(printf '%s' "${payload}" | jq -r '.tool_input.command // empty' 2>&1)" || return 1
-  HC_OUT="$(printf '%s' "${payload}" | jq -r '.tool_response // empty
-    | if type == "object" then ((.stdout // "") + "\n" + (.stderr // ""))
-      elif type == "string" then . else tostring end' 2>&1)" || HC_OUT=''
+  HC_OUT="$(printf '%s' "${payload}" | jq -r 'if .tool_response == null then (.error // "" | tostring)
+    else .tool_response
+      | if type == "object" then ((.stdout // "") + "\n" + (.stderr // ""))
+        elif type == "string" then . else tostring end end' 2>&1)" || HC_OUT=''
+  HC_FAILED=0
+  case "$(printf '%s' "${payload}" | jq -r '.hook_event_name // ""' 2>&1)" in PostToolUseFailure) HC_FAILED=1 ;; esac
   return 0
 }
 

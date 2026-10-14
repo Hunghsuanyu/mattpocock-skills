@@ -13,6 +13,8 @@
 # 開完 PR → 從輸出取 PR 網址，回查 GitHub 登記的關票清單（closingIssuesReferences）
 #   與內文的關閉關鍵字是否同一組票；內文那組用 ticket-check.sh 的 pr_closing_refs（同一個判法，只比本 repo 的票）。
 #   不同就提示（目標不是預設分支，GitHub 不登記；從 gh issue develop 開的分支，內文沒寫也會關票）。
+# 指令整體失敗（PostToolUseFailure，例：gh issue create … && 下一步失敗）：輸出裡有剛開的票網址 ⇒ 照樣自檢，
+#   訊息開頭註明「指令整體失敗，但票已開」；沒有 ⇒ 照「未執行」提示。
 # 測試：tests/test-hooks.sh。
 HPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 0
 # shellcheck source=lib/hook-common.sh
@@ -108,11 +110,16 @@ msg=''
 if hc_is_issue_create "${HC_CMD}"; then
   hc_ledger post-issue-create "${HC_CMD}"
   msg="$(hpo_issue)"
+  case "${msg}" in
+    *開票自檢未執行*) ;;
+    *) [ "${HC_FAILED}" != 1 ] || msg="${TAG} 指令整體失敗，但票已開——${NL}${msg}" ;;
+  esac
 fi
 if hc_is_pr_create "${HC_CMD}"; then
   hc_ledger post-pr-create "${HC_CMD}"
   m2="$(hpo_pr)"
   [ -z "${m2}" ] || msg="${msg:+${msg}${NL}}${m2}"
 fi
-[ -z "${msg}" ] || hc_emit PostToolUse "${msg}"
+ev=PostToolUse; [ "${HC_FAILED}" != 1 ] || ev=PostToolUseFailure
+[ -z "${msg}" ] || hc_emit "${ev}" "${msg}"
 exit 0

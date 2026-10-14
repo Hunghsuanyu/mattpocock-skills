@@ -10,7 +10,7 @@ scripts/ticket-check.sh <owner/repo> [票號 ...]
 - 只讀：只呼叫 GitHub 的讀取 API，不改任何票、標籤或設定。票內文一個 repo 一次 GraphQL 拿齊，不逐票讀。
 - 退出碼：`0` 全過；`1` 有 NG；`2` 參數用錯。跑完一定印 `--` 開頭的總結；沒有總結＝沒跑完，退出碼不是檢查結果。
 - 測試：`tests/test-ticket-check.sh`（只對假 gh 跑）。
-- 用 `gh issue create` 開完票，PostToolUse hook（`scripts/hook-post-bash.sh`）只取 `gh issue create` 印出的那一行票網址（整行就是網址），只對那張票跑一次，NG 放進對話；沒有那一行就不跑，並明講沒跑；自檢沒印總結就明講沒跑完；退出碼 0 但有 `??` 時講「沒有 NG，但有 N 處讀不到」，不寫全過。整行票網址比指令裡的開票次數多、指令裡又沒有迴圈（同一次 Bash 裡別的指令也印了票網址）⇒ 分不出哪張是剛開的，不跑、明講。
+- 用 `gh issue create` 開完票，PostToolUse hook（`scripts/hook-post-bash.sh`）只取 `gh issue create` 印出的那一行票網址（整行就是網址），只對那張票跑一次，NG 放進對話；沒有那一行就不跑，並明講沒跑；自檢沒印總結就明講沒跑完；退出碼 0 但有 `??` 時講「沒有 NG，但有 N 處讀不到」，不寫全過。整行票網址比指令裡的開票次數多、指令裡又沒有迴圈（同一次 Bash 裡別的指令也印了票網址）⇒ 分不出哪張是剛開的，不跑、明講。指令整體失敗（例：`gh issue create … && 下一步失敗`，Claude Code 改發 PostToolUseFailure，hook 也掛在那裡）時，輸出裡有剛開的票網址照樣自檢，訊息開頭註明「指令整體失敗，但票已開」；沒有就照「未執行」提示。錨點 SHA 問不到的也算進總結的「問不到 N 處」。
 
 ## 三態
 
