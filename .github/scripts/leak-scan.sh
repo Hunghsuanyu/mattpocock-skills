@@ -25,9 +25,12 @@
 # Exit: 0 clean, 1 hit, 2 bad usage / git failure / patterns missing or warning (never read as clean).
 #
 # Optional env: LEAK_NOREPLY (the fork owner's noreply address) and LEAK_OWNER (the owner's
-# account name) are removed from every record before scanning (lines, paths, message, names,
-# emails). So a pattern that is a substring of the owner name does not hit where the owner
-# name appears (it is removed first); to catch such text a pattern must include more than it.
+# account name). Nothing is removed from the text: every record (lines, paths, message, names,
+# emails) is matched as is, then a hit is dropped only when it lies wholly inside one place
+# where LEAK_OWNER or LEAK_NOREPLY appears (exact, case-sensitive match of the value). So a
+# pattern equal to, or contained in, the owner name or noreply address does not hit there,
+# but still hits anywhere else; a pattern that reaches past the owner text (for example
+# owner/repo) hits. The same rule applies to the generic e-mail check.
 set -uo pipefail
 
 SCANNER=''
@@ -93,16 +96,22 @@ sub out { my ($pos, $what) = @_; my ($c, $s, $at) = split /:/, $pos, 3;
   if ($c =~ /^c(\d+)\z/) { print "HIT commit=$1 sha=$s at=$at pattern=$what\n"; }
   else { print "HIT at=$pos pattern=$what\n"; }
   $hits++; }
+sub inside { my ($sp, $s, $e) = @_;    # hit [s, e) lies wholly within one owner span
+  for (@$sp) { return 1 if $s >= $_->[0] && $e <= $_->[1]; } return 0; }
 while (my $l = <STDIN>) {
   chomp $l; $l =~ s/\r\z//; $n++;
   my ($pos, $t) = split /\t/, $l, 2; $t //= '';
   if ($pos =~ /:binary\z/) { out($pos, 'binary'); next; }
   my $is_email = $pos =~ /:(?:author|committer)-email:/;
   if ($is_email && $t !~ $NR) { out($pos, 'non-noreply-email'); }
-  $t =~ s/\Q$noreply\E//g if $noreply ne '';
-  $t =~ s/\Q$owner\E//g   if $owner ne '';
-  for my $pp (@pat) { my ($i, $re) = @$pp; while ($t =~ /$re/g) { out($pos, $i); } }
-  while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR; }
+  my @own;                             # [start, end) of every owner / own-noreply occurrence
+  for my $s (grep { $_ ne '' } $noreply, $owner) {
+    my $q = quotemeta $s; while ($t =~ /$q/g) { push @own, [$-[0], $+[0]]; } }
+  for my $pp (@pat) { my ($i, $re) = @$pp;
+    while ($t =~ /$re/g) {
+      if (inside(\@own, $-[0], $+[0])) { pos($t) = $-[0] + 1; next; }   # retry from the next char
+      out($pos, $i); } }
+  while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR || inside(\@own, $-[0], $+[0]); }
 }
 print STDERR "leak-scan: $n records, $hits hits\n";
 fin($hits ? 1 : 0);
