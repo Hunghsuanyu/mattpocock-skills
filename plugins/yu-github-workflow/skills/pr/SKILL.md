@@ -28,7 +28,7 @@ metadata:
 
 - **只有整合分支收齊之後才開**，一次上線的範圍開一個 PR（整合分支 → 預設分支）。每張票不各開 PR，也不提早開草稿 PR。
 - 總驗收（`review` 改動模式）通過、每張 `重驗證-外審` 票都留了通過的結論之後才開：同一個 repo 的 PR 會用分支裡的 workflow 跑、拿得到 secret，改到 workflow 的分支要先驗過才能觸發。
-- 合併只有擁有者按。
+- 合併只有擁有者按。**公開 repo 的 PR 按合併時，把 GitHub 預設的 merge commit 標題改成不含分支名的句子**：預設標題帶來源分支名，合併後就留在公開歷史裡（分支命名規則見 [SPEC 範本](${CLAUDE_PLUGIN_ROOT}/skills/to-spec/references/spec-template.md) 第 2 段）。
 - 開之前讀 repo 設定 `docs/agents/github.md` 的「特殊禁忌」：不是 `無` → 讀它底下的「特殊禁忌」段，這個 PR 碰到的照著做。
 
 ## 3. 內文：三段自己寫，逐票事實與連票貼 `pr-risk.sh` 的輸出
@@ -55,7 +55,7 @@ metadata:
 <pr-risk.sh 的整份輸出：逐票事實 …… ## 連票 ……>
 ```
 
-`## 合併風險` 標題、Door、Blast Radius 由你寫；`pr-risk.sh` 的輸出原樣接在後面；唯一要動的是：輸出裡要是也印了 `## 合併風險` 標題，刪掉那一行，只留你寫的那一個。
+`## 合併風險` 標題、Door、Blast Radius 由你寫；`pr-risk.sh` 的輸出原樣接在後面（它不印這個標題）。
 
 公開 repo 的 PR 共三段：摘要、證據、`## 合併風險`（只留 Door 與 Blast Radius，見下面「合併風險」）。
 

@@ -38,6 +38,7 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
    git -C <repo> fetch origin
    git -C <repo> worktree add -b <分支> <工作樹路徑> origin/<整合分支>
    ```
+   **分支名**：分支所在的 repo 是公開的，而票開在別的（私有）repo 時，施工分支名不帶票號——公開 repo 的分支清單與 merge commit 的預設訊息都看得到分支名（和整合分支同一條，見 [SPEC 範本](${CLAUDE_PLUGIN_ROOT}/skills/to-spec/references/spec-template.md) 第 2 段）。
    不用 `gh issue develop` 開（理由見 [read-narrow.md](${CLAUDE_PLUGIN_ROOT}/skills/implement/references/read-narrow.md)「從票開分支」）。
 
 ## 4. 讀窄、搜寬
