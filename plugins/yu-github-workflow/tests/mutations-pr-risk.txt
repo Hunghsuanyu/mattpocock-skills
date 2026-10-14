@@ -1,12 +1,12 @@
-s/irrev=1;/irrev=0;/
-s/u_self=1; why=.*$/:/
 s/elif \[ "\${verdict}" != pass \]; then/elif false; then/
 s/verdict = "pass" if res == "通過" else "fail"/verdict = "pass" if "通過" in res else "fail"/
-s/u_review=1; why='找不到外審結論'/why='找不到外審結論'/
+s/u_review=1; review='無/review='無/
 s/^\[ -z "\${reasons}" \] || exit 3$/:/
-s/^if \[ -n "\${reasons}" \]; then door=/if [ -n "${reasons}" ] \&\& [ "${any_one_way}" = 0 ]; then door=/
-# 第一行：讓「重驗證的票內文標了④ → 單向門」失效（test-pr-risk.sh 的單向門案例必須紅）。
-# 第2行起（修正軌補）：每行一發，各自單獨跑。依序：重驗證-自檢看不出②④⑤不算未定（「重-自檢看不出②④⑤」案例要紅）；
+s/u_label=1; level=/level=/
+s/review="有：\${url}"/review="有"/
+s/after='有'; links+=/after='無'; links+=/
+# 每行一發，各自單獨跑（第 2 輪改寫：pr-risk 不再判門，舊的「④→單向門」「看不出②④⑤→未定」「單向門蓋過未定」三發隨功能拿掉）。依序：
 #   外審結論不通過不算未定（「重-外審結論不通過」案例要紅）；「不通過」含「通過」被當成通過（同上）；
-#   找不到外審結論不算未定（「重-外審沒結論：門未定」要紅）；未定不回 rc=3（各 rc=3 案例要紅）；
-#   單向門蓋過未定（「單向門＋沒掛標籤」要紅）。
+#   找不到外審結論不算未定（「重-外審沒結論：rc=3」要紅）；未定不回 rc=3（各 rc=3 案例要紅）；
+#   沒掛驗證標籤不算未定（「沒掛驗證標籤：rc=3」要紅）；外審結論不附連結（「重-外審有結論：列出結論留言的連結」要紅）；
+#   合併後步驟欄不照判法填（「合併後有步驟：那一列寫有」要紅）。

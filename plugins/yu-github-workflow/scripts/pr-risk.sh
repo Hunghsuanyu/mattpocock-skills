@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 # 用法：pr-risk.sh <owner/repo> <票號…>
 #
-# 讀一批票的驗證標籤、內文與留言（只讀，不寫任何東西），印出 PR 內文的「合併風險」段與連票清單。
-# 合併風險由驗證等級帶出，不靠寫 PR 的人判斷；判準是 references/labels.md 的驗證段。
-#   - 門：任一張票判不出來 → 未定（蓋過單向門；原因全列在門那一行）。判不出來有三種：
-#           有票沒掛驗證標籤；掛 `重驗證-自檢` 而內文看不出②／④／⑤；
-#           掛 `重驗證-外審` 而找不到驗證者的結論留言、或最後一則結論不是「結果：通過」。
-#         否則：有一張票掛 `重驗證-自檢` 或 `重驗證-外審`、而且內文標了④（不可逆）→ 單向門；其餘 → 雙向門。
-#   - 外審：掛 `重驗證-外審` 的票，列出驗證者結論留言的連結（留言最後一行是「— 🔍 …」署名、含「結果」，
-#           有好幾則取最後一則）；找不到或結論不是通過就照實印出來，不省略。
+# 讀一批票的驗證標籤、內文與留言（只讀，不寫任何東西），印出 PR 內文「合併風險」段要用的事實與連票清單。
+# 只列事實、不判門：Door（one-way／two-way）與 Blast Radius 由開 PR 的模型看實際改動自己寫。
+#   - 每張票一列：驗證標籤（同時掛好幾個取最重的；沒掛就照實寫）、外審結論、有沒有合併後步驟。
+#   - 外審結論：只看掛 `重驗證-外審` 的票（其他票印「不需要」）。找驗證者的結論留言——留言最後一個非空行
+#     以「— 🔍」開頭、而且含「結果」，現行署名格式是
+#       — 🔍 驗證｜<機器>｜session <8 碼>｜分支 <整合分支>｜結果：通過
+#     有好幾則取最後一則。「結果」後面（去掉冒號與空白）恰好是「通過」才算通過，「不通過」「有條件通過」都不算。
+#     印「有：<留言網址>」「不通過：<留言網址>」或「無（找不到結論留言）」。
+#     留言是 `gh issue view --json comments` 讀的：gh 會自己分頁讀完全部留言，沒有 100 則上限。
 #   - 連票：合併後還有步驟的票寫 Refs，其餘寫 Closes。「合併後還有步驟」的判法在
 #           scripts/lib/after-merge-step.sh，開票自檢用同一份。
-#   - 影響範圍只印佔位，由開 PR 的人填一個詞。
 #
-# 退出碼：0 成功（門是單向門或雙向門）；
-#         3 門「未定」——stdout 照常印完整輸出（門那一行印「未定（原因）」），先補齊、不開 PR；
+# 退出碼：0 全部讀到、沒有未定；
+#         3 未定——有掛 `重驗證-外審` 的票外審結論缺席或不通過，或有票沒掛驗證標籤。
+#           stdout 照常印完整輸出，表格後面多一行「**未定：** <原因>」；先補齊、不開 PR；
 #         2 有一張票讀不到或讀到的形狀不對——stdout 什麼都不印，不輸出半份；64 參數錯。
 set -uo pipefail
 PRR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 9
@@ -73,10 +74,9 @@ for n in "$@"; do
   fi
 done
 
-# ── 2. 逐張判定 ──
-rows=() reviews=() links=()
-any_one_way=0 any_review=0
-u_label=0 u_self=0 u_review=0 # 三種「未定」
+# ── 2. 逐張列事實 ──
+rows=() links=()
+u_label=0 u_review=0 # 兩種「未定」
 for n in "$@"; do
   ref="${REPO}#${n}"
   labels="$(cat "${T}/${n}.labels")"
@@ -85,65 +85,40 @@ for n in "$@"; do
   for L in 重驗證-外審 重驗證-自檢 中驗證 輕驗證; do # 同時掛了多個取最重的
     if grep -qxF -- "${L}" <<< "${labels}"; then level="${L}"; break; fi
   done
+  [ -n "${level}" ] || { u_label=1; level='（沒掛驗證標籤）'; }
 
-  irrev=0 why=''
-  case "${level}" in
-    重驗證-自檢 | 重驗證-外審) [[ "${body}" == *④* ]] && irrev=1; ;;
-  esac
-  if [ "${level}" = 重驗證-自檢 ] && [[ "${body}" != *②* && "${body}" != *④* && "${body}" != *⑤* ]]; then
-    u_self=1; why='內文看不出②／④／⑤'
-  fi
+  review='不需要'
   if [ "${level}" = 重驗證-外審 ]; then
-    any_review=1
     url="$(cat "${T}/${n}.review")"
     verdict="$(cat "${T}/${n}.verdict")"
     if [ -z "${url}" ]; then
-      u_review=1; why='找不到外審結論'
-      reviews+=("- ${ref}：找不到驗證者的結論留言（最後一行「— 🔍 …」署名、含「結果」）——外審沒做完不開 PR")
+      u_review=1; review='無（找不到結論留言）'
       echo "pr-risk: ${ref} 掛了 重驗證-外審，找不到結論留言" >&2
     elif [ "${verdict}" != pass ]; then
-      u_review=1; why='外審結論不是通過'
-      reviews+=("- ${ref}：結論不是通過（${url}）——外審沒過不開 PR")
+      u_review=1; review="不通過：${url}"
       echo "pr-risk: ${ref} 掛了 重驗證-外審，最後一則結論不是通過" >&2
     else
-      reviews+=("- ${ref}：${url}")
+      review="有：${url}"
     fi
   fi
 
-  if [ -z "${level}" ]; then
-    u_label=1; rows+=("| ${ref} | （沒掛驗證標籤） | 未定 |")
-  elif [ -n "${why}" ]; then
-    rows+=("| ${ref} | ${level} | 未定（${why}） |")
-  elif [ "${irrev}" = 1 ]; then
-    any_one_way=1; rows+=("| ${ref} | ${level} | 單向門（內文標了④不可逆） |")
-  else
-    rows+=("| ${ref} | ${level} | 雙向門 |")
-  fi
-
-  if has_after_merge_step "${body}"; then links+=("Refs ${ref}"); else links+=("Closes ${ref}"); fi
+  if has_after_merge_step "${body}"; then after='有'; links+=("Refs ${ref}"); else after='無'; links+=("Closes ${ref}"); fi
+  rows+=("| ${ref} | ${level} | ${review} | ${after} |")
 done
 
 reasons=''
+[ "${u_review}" = 1 ] && reasons="${reasons}；有掛 重驗證-外審 的票外審結論缺席或不通過"
 [ "${u_label}" = 1 ] && reasons="${reasons}；有票沒掛驗證標籤"
-[ "${u_self}" = 1 ] && reasons="${reasons}；重驗證-自檢的票看不出②／④／⑤"
-[ "${u_review}" = 1 ] && reasons="${reasons}；重驗證-外審的票沒有通過的外審結論"
-if [ -n "${reasons}" ]; then door="未定（${reasons#；}）"
-elif [ "${any_one_way}" = 1 ]; then door=單向門
-else door=雙向門; fi
 
 # ── 3. 輸出 ──
 echo "## 合併風險"
 echo
-echo "**門：** ${door}"
-echo "**影響範圍：** <一個詞，開 PR 的人填>"
-echo
-echo "| 票 | 驗證 | 這張的門 |"
-echo "|---|---|---|"
+echo "| 票 | 驗證標籤 | 外審結論 | 合併後步驟 |"
+echo "|---|---|---|---|"
 printf '%s\n' "${rows[@]}"
-if [ "${any_review}" = 1 ]; then
+if [ -n "${reasons}" ]; then
   echo
-  echo "**外審結論：**"
-  printf '%s\n' "${reviews[@]}"
+  echo "**未定：** ${reasons#；}"
 fi
 echo
 echo "## 連票"
