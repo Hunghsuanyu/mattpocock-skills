@@ -1,0 +1,76 @@
+name: leak-scan
+
+# Scans what a push or PR adds to this public fork for internal identifiers.
+# The identifier list lives only in the LEAK_PATTERNS repo secret; this file holds generic logic.
+# Logs only say which commit / line / pattern number hit, never the matched text.
+
+on:
+  push:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A branch-delete push scans nothing (the job is skipped), so it gets a group of its own:
+  # sharing the branch's group would let it replace a queued run that had not scanned yet.
+  group: ${{ github.event_name == 'push' && github.event.deleted && format('leak-scan-delete-{0}', github.run_id) || format('leak-scan-{0}', github.ref) }}
+  # Every other run rescans everything its head adds over upstream main (the whole PR, or the
+  # whole pushed branch), so a newer run covers a queued run that concurrency replaced.
+  # In-progress push runs are still left to finish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  scan:
+    if: github.event_name != 'push' || !github.event.deleted
+    runs-on: ubuntu-latest
+    # Minimum of 5 minutes: no measured run yet; the scan itself takes seconds.
+    timeout-minutes: 5
+    env:
+      LEAK_OWNER: ${{ github.repository_owner }}
+      LEAK_NOREPLY: ${{ github.repository_owner_id }}+${{ github.repository_owner }}@users.noreply.github.com
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4 at pin time)
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch upstream main (commits already there are not ours to scan)
+        run: git fetch --no-tags --quiet https://github.com/mattpocock/skills main
+
+      - name: Scan commits
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+          EVENT: ${{ github.event_name }}
+          AFTER: ${{ github.event.after }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          up=$(git rev-parse --verify --quiet FETCH_HEAD) || { echo "cannot read upstream main"; exit 2; }
+          if [ "$EVENT" = pull_request ]; then
+            head="$PR_HEAD"; base="$PR_BASE"
+          else
+            # Push: every commit on the pushed head that upstream main lacks, not just
+            # before..after. A push whose run was cancelled while queued is covered by the next.
+            head="$AFTER"; base=""
+          fi
+          bash .github/scripts/leak-scan.sh commits . "$up" "$head" ${base:+"$base"}
+
+      - name: Scan PR title and body
+        if: github.event_name == 'pull_request'
+        # Title and body are read from the event file, not passed through env:
+        # step env values are printed in the public log.
+        env:
+          LEAK_PATTERNS: ${{ secrets.LEAK_PATTERNS }}
+        run: |
+          set -uo pipefail
+          jq -r '.pull_request.title // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-title" || { echo "cannot read PR title"; exit 2; }
+          jq -r '.pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/pr-body" || { echo "cannot read PR body"; exit 2; }
+          rc=0; r2=0
+          bash .github/scripts/leak-scan.sh text pr-title < "$RUNNER_TEMP/pr-title" || rc=$?
+          [ "$rc" -le 1 ] || exit "$rc"
+          bash .github/scripts/leak-scan.sh text pr-body < "$RUNNER_TEMP/pr-body" || r2=$?
+          [ "$r2" -le 1 ] || exit "$r2"
+          exit $(( rc > r2 ? rc : r2 ))
