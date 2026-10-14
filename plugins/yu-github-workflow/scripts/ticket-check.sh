@@ -144,17 +144,25 @@ closes_problem() {
 
 # 格 7 的整合 PR：PR 內文用關閉關鍵字（close／fix／resolve 各種時態）指到本 repo 的票號，一行一個。
 # 參數：PR 內文、本 repo（owner/repo）。`Refs` 不是關閉關鍵字；code span 與 fenced code block 裡的關鍵字 GitHub 不認，先拿掉。
-# 指到別的 repo（`owner/repo` 加票號，且不是本 repo）的不算。
+# 票可以寫 `#N`、`owner/repo#N`，或票的網址 `https://github.com/owner/repo/issues/N`（GitHub 都認）。
+# 指到別的 repo（且不是本 repo）的不算。
 pr_closing_refs() {
   printf '%s\n' "$1" | awk -v me="$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" '
-    # fenced code block：``` 或 ~~~ 開頭的行開始，到同一種圍欄的行結束（圍欄行本身也不掃）。
-    fence == "" && match($0, /^[ \t]*(```|~~~)/) { fence = substr($0, RSTART + RLENGTH - 3, 3); next }
-    fence != "" { if ($0 ~ ("^[ \t]*" fence)) fence = ""; next }
+    # fenced code block：三個以上的 ` 或 ~ 開頭的行開始，到「同一種字元、長度不少於開頭」的圍欄行結束
+    # （圍欄行本身也不掃；四個反引號開的區塊，裡面的三個反引號不會關上它）。
+    fence == "" && match($0, /^[ \t]*(```+|~~~+)/) {
+      f = substr($0, RSTART, RLENGTH); sub(/^[ \t]*/, "", f); fc = substr(f, 1, 1); fence = f; next }
+    fence != "" {
+      if (match($0, /^[ \t]*(```+|~~~+)[ \t]*$/)) {
+        g = substr($0, RSTART, RLENGTH); gsub(/[ \t]/, "", g)
+        if (substr(g, 1, 1) == fc && length(g) >= length(fence)) fence = ""
+      }
+      next }
     { s = tolower($0); gsub(/`[^`]*`/, "", s)
-      while (match(s, /(^|[^a-z0-9_])(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?[ \t]+([a-z0-9_.-]+\/[a-z0-9_.-]+)?#[0-9]+/)) {
+      while (match(s, /(^|[^a-z0-9_])(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved):?[ \t]+(https:\/\/github\.com\/[a-z0-9_.-]+\/[a-z0-9_.-]+\/issues\/|([a-z0-9_.-]+\/[a-z0-9_.-]+)?#)[0-9]+/)) {
         m = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-        n = m; sub(/.*#/, "", n)
-        q = m; sub(/#[0-9]+$/, "", q); sub(/^.*[ \t]/, "", q)
+        n = m; sub(/.*[#\/]/, "", n)
+        q = m; sub(/^.*[ \t]/, "", q); sub(/^https:\/\/github\.com\//, "", q); sub(/(\/issues\/|#)[0-9]+$/, "", q)
         if (q == "" || q == me) print n
       } }' | sort -un
 }
@@ -188,11 +196,16 @@ _executor() {  # 署名行 ⇒ 印「agent <id> <session>」或「session <id> <
   fi
   return 0
 }
+# 署名行前面的 markdown 修飾（空白、引用的 `>`、粗體斜體的 `*`／`_`）先去掉再認。
+# 去掉之後仍不是以署名開頭、但行內有「🔍 驗證」的，算一則讀不出執行者的驗證署名（不當成沒有驗證署名）。
+_sig_strip() { local x="$1"; while :; do case "$x" in [[:space:]\>\*_]*) x="${x#?}" ;; *) break ;; esac; done; printf '%s' "$x"; }
 self_verify_verdict() {
   local line e builders=() verifiers=() b v bk bi bs vk vi vs nv=0 unread=''
   while IFS= read -r line; do
+    line=$(_sig_strip "$line")
     case "$line" in
       '— 🔨 施工'*|'— 🔍 驗證'*) ;;
+      *'🔍 驗證'*) nv=$((nv+1)); [ -n "$unread" ] || unread="$line"; continue ;;
       *) continue ;;
     esac
     e=$(_executor "$line")
@@ -289,6 +302,7 @@ only=''   # 空＝查整個 repo；否則「 號 號 」
 for x in "$@"; do
   x="${x#\#}"
   case "$x" in ''|*[!0-9]*) usage ;; esac
+  x=$((10#$x))   # 012 ＝ 12（GitHub 的票號沒有前導零）
   only="${only:- } $x "
 done
 want_n() { [ -z "$only" ] || case "$only" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
@@ -527,6 +541,15 @@ lbad=0; lunk=0; lopen=0; lclosed=0; lother=0; oopen=0
       | { grep -Eo '/(blob|tree)/[0-9a-f]{40}([^0-9a-fA-F]|$)' || true; } \
       | { grep -c . || true; })
     if [ "$sha" = 0 ]; then
+      # 沒有程式碼錨點的票（開票、決定、查證…）在錨點段明寫一行「- 無：<理由>」（半形或全形冒號），理由不可空。
+      none=$(printf '%s\n' "$anc" | awk '!d && /^[ \t]*[-*][ \t]+無[ \t]*(:|：)/ {
+        v = $0; sub(/^[ \t]*[-*][ \t]+無[ \t]*(:|：)/, "", v); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+        print (v == "" ? "EMPTY" : "R " v); d = 1 }')
+      case "$none" in
+        'R '*) printf '   %-14s#%-3s 錨點 無：%s\n' "$short" "$n" "${none#R }"; continue ;;
+        EMPTY) printf 'NG %-14s#%-3s 錨點寫了「無」但沒寫理由（寫成「- 無：<理由>」） — %s\n' "$short" "$n" "$title"
+               bad=$((bad+1)); continue ;;
+      esac
       printf 'NG %-14s#%-3s 錨點沒有 SHA 固定連結 — %s\n' "$short" "$n" "$title"
       bad=$((bad+1)); continue
     fi
@@ -561,8 +584,10 @@ lbad=0; lunk=0; lopen=0; lclosed=0; lother=0; oopen=0
           seen_ok="$seen_ok $key"
         else
           # 分得出「不在」與「沒問到」——這一格是本支唯一會冤枉人的地方。
+          #   422（No commit found）＝ repo 讀得到、那顆 SHA 不在 ⇒ NG。
+          #   404（Not Found）＝ repo 讀不到：沒權限讀的私有 repo 也回 404 ⇒ 分不出「不在」，落到下面的 ??。
           case "$err" in
-            *'HTTP 404'*|*'HTTP 422'*|*'No commit found'*|*'Not Found'*)
+            *'HTTP 422'*|*'No commit found'*)
               printf 'NG %-14s#%-3s 錨點指的 SHA 在 %s/%s **不存在**：%s\n' \
                 "$short" "$n" "$o" "$r" "$s40"
               seen_ng="$seen_ng $key"; miss=$((miss+1)) ;;
@@ -583,6 +608,7 @@ EOF
         "$short" "$n" "$sha" "$nurl" "$((sha-nurl))"
     fi
 
+    lunk=$((lunk+unk))   # 錨點 SHA 問不到的也算進總結的「問不到 N 處」
     if [ "$miss" -gt 0 ]; then
       bad=$((bad+1))
     else

@@ -5,12 +5,16 @@
 # 開完票 → 跑 ticket-check.sh <owner/repo> <票號…>，只查剛開的票。票只取自 gh issue create 印出的那一行
 #   （成功時一定印一行、整行就是 https://github.com/<owner>/<repo>/issues/<號>，不帶 -R 也一樣）；
 #   輸出裡別處提到的票網址（內文、前一個指令的輸出）不算。
+#   整行就是票網址的行比指令裡的開票次數多、而且指令裡沒有迴圈 ⇒ 同一次 Bash 裡別的指令也印了票網址
+#   （例：gh issue view --json url -q .url），分不出哪張是剛開的 ⇒ 不跑，明講。
 #   不退回 -R／--repo 參數，也不從 cwd 推：建票失敗時拿參數去自檢，會對著沒開成的票報 NG 或全過；
 #   clone 有兩個 remote 時從 cwd 推，會對著別的 repo 報全過。沒有那一行＝沒開成或沒讀到 → 不跑，明講沒跑。
 #   自檢沒印 `--` 總結＝沒跑完：明講，不當成 NG（退出碼此時不是檢查結果）。
 # 開完 PR → 從輸出取 PR 網址，回查 GitHub 登記的關票清單（closingIssuesReferences）
 #   與內文的關閉關鍵字是否同一組票；內文那組用 ticket-check.sh 的 pr_closing_refs（同一個判法，只比本 repo 的票）。
 #   不同就提示（目標不是預設分支，GitHub 不登記；從 gh issue develop 開的分支，內文沒寫也會關票）。
+# 指令整體失敗（PostToolUseFailure，例：gh issue create … && 下一步失敗）：輸出裡有剛開的票網址 ⇒ 照樣自檢，
+#   訊息開頭註明「指令整體失敗，但票已開」；沒有 ⇒ 照「未執行」提示。
 # 測試：tests/test-hooks.sh。
 HPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 0
 # shellcheck source=lib/hook-common.sh
@@ -21,12 +25,18 @@ NL='
 '
 
 hpo_issue() {
-  local urls repos repo nums out rc label_ng other_ng shown msg=''
+  local urls nurl ncreate repos repo nums out rc label_ng cell_ng other_ng nunk shown msg=''
   urls="$(printf '%s\n' "${HC_OUT}" | tr -d '\r' \
     | { grep -Ex '[[:space:]]*https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[0-9]+[[:space:]]*' || true; } \
     | tr -d ' \t')"
   if [ -z "${urls}" ]; then
     printf '%s' "${TAG} 開票自檢未執行：沒有讀到 gh issue create 印出的票網址（可能沒開成）。開成了就自己跑 ticket-check.sh <owner/repo> <票號>。"
+    return
+  fi
+  nurl="$(printf '%s\n' "${urls}" | awk 'NF' | wc -l | tr -d ' ')"
+  ncreate="$(hc_issue_create_count "${HC_CMD}")"
+  if [ "${nurl}" -gt "${ncreate}" ] && ! hc_has_loop "${HC_CMD}"; then
+    printf '%s' "${TAG} 開票自檢未執行：輸出裡有 ${nurl} 行票網址，指令裡只開了 ${ncreate} 次票——同一次 Bash 裡別的指令也印了票網址，分不出哪張是剛開的。自己跑 ticket-check.sh <owner/repo> <票號>（網址：$(printf '%s\n' "${urls}" | paste -sd ' ' -)）。"
     return
   fi
   repos="$(printf '%s\n' "${urls}" | sed -E 's#^https://github\.com/([^/]+/[^/]+)/issues/.*#\1#' | awk '!s[$0]++')"
@@ -38,16 +48,22 @@ hpo_issue() {
       msg+="${TAG} 開完票了——開票自檢沒跑完（${repo} ${nums}）：沒印出總結（退出碼 ${rc}），下面不是檢查結果。自己重跑 ticket-check.sh ${repo} ${nums}。${NL}$(printf '%s\n' "${out}" | tail -n 5)${NL}"
       continue
     fi
-    label_ng="$(printf '%s\n' "${out}" | grep -E '^NG .* 標籤 格[0-9]' || true)"
+    # NG 分三類給提示：標籤格 1、2（類型／優先／驗證）、標籤格 3～8（機器、狀態、署名、衍生、誤關票）、其他（錨點、格 9）。
+    label_ng="$(printf '%s\n' "${out}" | grep -E '^NG .* 標籤 格[12] ' || true)"
+    cell_ng="$(printf '%s\n' "${out}" | grep -E '^NG .* 標籤 格[3-8] ' || true)"
     other_ng="$(printf '%s\n' "${out}" | grep -E '^NG ' | grep -vE '^NG .* 標籤 格[0-9]' || true)"
+    nunk="$(printf '%s\n' "${out}" | awk '/^--$/ { exit } /^\?\? / { n++ } END { print n + 0 }')"
     # 只放 NG／??／!! 與結尾摘要；OK 的票一張一行，放進來只會把要看的淹掉。
     shown="$(printf '%s\n' "${out}" | awk '/^--$/ { tail = 1; next } tail || /^(NG|\?\?|!!) /')"
-    if [ "${rc}" -eq 0 ]; then
+    if [ "${rc}" -eq 0 ] && [ "${nunk}" -gt 0 ]; then
+      msg+="${TAG} 開完票了——開票自檢（${repo} ${nums}）沒有 NG，但有 ${nunk} 處讀不到（?? 行，那幾格沒查）。${NL}${shown}${NL}"
+    elif [ "${rc}" -eq 0 ]; then
       msg+="${TAG} 開完票了——開票自檢（${repo} ${nums}）全過。${NL}${shown}${NL}"
     else
       msg+="${TAG} 開完票了——開票自檢（${repo} ${nums}）退出碼 ${rc}：${NL}${shown}${NL}"
-      [ -z "${other_ng}" ] || msg+="錨點／做完能展示什麼 NG：施工者開工要自己去找缺的錨點，現在補（錨點段放 SHA 固定連結，SHA 用 git rev-parse 取）。${NL}"
+      [ -z "${other_ng}" ] || msg+="錨點／做完能展示什麼 NG：施工者開工要自己去找缺的錨點，現在補（錨點段放 SHA 固定連結，SHA 用 git rev-parse 取；真的沒有程式碼錨點就寫一行「- 無：<理由>」）。${NL}"
       [ -z "${label_ng}" ] || msg+="標籤 NG：照 references/labels.md 補掛（類型／優先／驗證各一個）。${NL}"
+      [ -z "${cell_ng}" ] || msg+="格 3～8 NG：照 NG 行的說明改（每格判準見 references/ticket-check.md）。${NL}"
       [ "${rc}" -eq 1 ] || msg+="退出碼不是 0／1：自檢本身沒跑成，上面的輸出不是檢查結果。${NL}"
     fi
   done <<< "${repos}"
@@ -94,11 +110,16 @@ msg=''
 if hc_is_issue_create "${HC_CMD}"; then
   hc_ledger post-issue-create "${HC_CMD}"
   msg="$(hpo_issue)"
+  case "${msg}" in
+    *開票自檢未執行*) ;;
+    *) [ "${HC_FAILED}" != 1 ] || msg="${TAG} 指令整體失敗，但票已開——${NL}${msg}" ;;
+  esac
 fi
 if hc_is_pr_create "${HC_CMD}"; then
   hc_ledger post-pr-create "${HC_CMD}"
   m2="$(hpo_pr)"
   [ -z "${m2}" ] || msg="${msg:+${msg}${NL}}${m2}"
 fi
-[ -z "${msg}" ] || hc_emit PostToolUse "${msg}"
+ev=PostToolUse; [ "${HC_FAILED}" != 1 ] || ev=PostToolUseFailure
+[ -z "${msg}" ] || hc_emit "${ev}" "${msg}"
 exit 0

@@ -193,6 +193,11 @@ want_v5 NG "$NB" '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結�
 want_v5 UNKNOWN "$NB" '— 🔍 驗證｜機器B｜分支 x｜結果：通過' '— 🔍 驗證｜機器B｜session KlmnOpqr｜分支 x｜結果：通過'
 # 欄位對位：執行者字樣只出現在別的欄（新署名的分支欄）不算執行者
 want_v5 UNKNOWN "$NB" '— 🔍 驗證｜機器B｜—｜分支 session PqrsTuvw｜結果：通過'
+# 署名前面多了 markdown 修飾（粗體、引用）照認；認不出開頭、但行內有「🔍 驗證」⇒ UNKNOWN，不是「沒有驗證署名」
+want_v5 NG "$NB" '**— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過**'
+want_v5 NG "$NB" '> — 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
+want_v5 NG '> **— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x**' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
+want_v5 UNKNOWN "$NB" '結論如上 🔍 驗證｜機器A｜session PqrsTuvw'
 
 # ══ 格 6：衍生（掛了 `衍生` ⇒ 上層必須是 SPEC） ══
 want_d6() {  # 期望（clean／NG） 上層票標題（空＝沒有上層） labels
@@ -248,6 +253,10 @@ want_refs ''      "$(printf 'closes example-org/other%s5' "$H")"        # 別的
 want_refs ''      "$(printf 'encloses %s5' "$H")"                       # 字中間不算關鍵字
 want_refs '7'     "$(printf '```\nCloses %s5\n```\nCloses %s7' "$H" "$H")"   # fenced（```）裡不算，圍欄外照算
 want_refs '7'     "$(printf '~~~bash\nfixes %s5\n```\nfixes %s6\n~~~\nfixes %s7' "$H" "$H" "$H")"   # ~~~ 只被 ~~~ 關上
+want_refs '7'     "$(printf '````\n```\nCloses %s5\n```\n````\nCloses %s7' "$H" "$H")"   # 四個反引號開的區塊，三個反引號關不上
+want_refs '5'     'Closes https://github.com/example-org/app-one/issues/5'     # 寫票的網址也算（GitHub 認）
+want_refs '6'     'fixes https://github.com/Example-Org/App-One/issues/6'      # 網址大小寫不拘
+want_refs ''      'Closes https://github.com/example-org/other/issues/5'       # 別的 repo 的網址不算
 
 # ══ 設定區塊解析 ══
 CFG_DOC="$(printf '%s\n' '# GitHub 工作流設定' '' '## 機器讀的欄位' '' '```text' \
@@ -319,13 +328,19 @@ case "$1 $2" in
     case "$3" in
       repos/*/labels*)        fx labels ;;
       repos/*/pulls*)         fx pulls ;;
-      repos/*/issues/*/comments*) n="${3#repos/*/issues/}"; n="${n%%/*}"; fx "comments-$n" ;;
+      repos/*/issues/*/comments*) n="${3#repos/*/issues/}"; n="${n%%/*}"
+                                  [ ! -f "$FX/comments-fail-$n" ] || { echo 'HTTP 502: Bad Gateway' >&2; exit 1; }
+                                  fx "comments-$n" ;;
       repos/*/issues*)        fx issues ;;
       *) echo "假 gh：沒預期的呼叫 $*" >&2; exit 97 ;;
     esac ;;
   'api repos/'*)
     case "$2" in
-      */commits/*) exit 0 ;;
+      */commits/*) c="${2##*/}"
+                   case "$(cat "$FX/commit-$c" 2>&1)" in
+                     422) echo "gh: No commit found for SHA: $c (HTTP 422)" >&2; exit 1 ;;
+                     404) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
+                   esac; exit 0 ;;
       *) cat "$FX/default_branch" ;;
     esac ;;
   'issue view') [ ! -f "$FX/view-fail-$3" ] || { echo 'HTTP 502: Bad Gateway' >&2; exit 1; }; fx "view-$3" ;;
@@ -441,10 +456,47 @@ i=100; while [ "$i" -lt 200 ]; do printf '%s\t\t%s\n' "$i" "$pad" >> "$T/fx-d/cl
 run_main "$T/fx-d"
 want_main '大輸出 ⇒ 跑到最後一行總結、rc=0' "$([ "$RC" = 0 ] && has '施工票 1 張' && ! has 'Broken pipe'; echo $?)"
 
-# ── 單張票內文問不到也不能讓整支死在半路：舊版逐票 issue view，一張失敗就 set -e 中途死、rc=1 與 NG 分不出來 ──
-FE="$T/fx-e"; mkfx "$FE"; cfg_labels "$FE" '機器A,機器B'; : > "$FE/view-fail-1"
+# ── 單張票內文問不到（會關票 PR 的那次 GraphQL 裡缺這張的列）⇒ 那張印 ??、照樣跑到總結、rc=0 ──
+FE="$T/fx-e"; mkfx "$FE"; cfg_labels "$FE" '機器A,機器B'
+grep -v '^1	' "$FE/closers" > "$FE/closers.x"; mv "$FE/closers.x" "$FE/closers"
 run_main "$FE"
-want_main '單張票 issue view 失敗 ⇒ 照樣跑到 -- 總結、rc=0' "$([ "$RC" = 0 ] && grep -qx -- '--' "$T/out" && has '施工票 1 張'; echo $?)"
+want_main 'closers 缺這張的列 ⇒ ?? 問不到內文、跑到總結、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*問不到這張票的內文" "$T/out" && grep -qx -- '--' "$T/out" && has '施工票 0 張'; echo $?)"
+# ── 留言 API 失敗 ⇒ 格 5 印 ??、不判紅 ──
+FK="$T/fx-k"; mkfx "$FK"; cfg_labels "$FK" '機器A,機器B'; : > "$FK/comments-fail-1"
+run_main "$FK"
+want_main '留言讀不到 ⇒ 格 5 ??、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*格5 問不到留言" "$T/out"; echo $?)"
+
+# ── 錨點那顆 SHA：422（repo 讀得到、SHA 不在）⇒ NG；404（沒權限讀的私有 repo 也是 404）⇒ ??，不判紅 ──
+FQ="$T/fx-q"; mkfx "$FQ"; cfg_labels "$FQ" '機器A,機器B'
+echo 422 > "$FQ/commit-$SHA"
+run_main "$FQ"
+want_main 'SHA 422 ⇒ 不存在、rc=1' "$([ "$RC" = 1 ] && grep -q "^NG .*${H}1 .*SHA 在 example-org/app-one \*\*不存在\*\*" "$T/out"; echo $?)"
+echo 404 > "$FQ/commit-$SHA"
+run_main "$FQ"
+want_main 'SHA 404 ⇒ ?? 問不到、不判不存在、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*問不到 example-org/app-one@" "$T/out" && ! grep -q '^NG' "$T/out"; echo $?)"
+want_main 'SHA 404 ⇒ 總結的「問不到」算進這一處' "$(has '問不到 1 處'; echo $?)"
+
+# ── 錨點「無」：錨點段明寫一行「- 無：<理由>」⇒ OK、印出理由；理由空 ⇒ NG；完全沒有錨點段照樣 NG ──
+FW="$T/fx-w"; mkfx "$FW"; cfg_labels "$FW" '機器A,機器B'
+setbody "$FW" "$DEMO
+## 錨點
+- 無：這張只決定下一階段要開哪些票，不碰程式碼"
+run_main "$FW"
+want_main '錨點「- 無：理由」（全形冒號）⇒ OK、印理由、rc=0' "$([ "$RC" = 0 ] && has '錨點 無：這張只決定下一階段要開哪些票' && ! grep -q '^NG' "$T/out"; echo $?)"
+setbody "$FW" "$DEMO
+## 錨點
+- 無: 查證票，只讀不改"
+run_main "$FW"
+want_main '錨點「- 無: 理由」（半形冒號）⇒ OK' "$([ "$RC" = 0 ] && has '錨點 無：查證票，只讀不改'; echo $?)"
+setbody "$FW" "$DEMO
+## 錨點
+- 無："
+run_main "$FW"
+want_main '錨點「- 無：」沒理由 ⇒ NG、rc=1' "$([ "$RC" = 1 ] && has '錨點寫了「無」但沒寫理由'; echo $?)"
+setbody "$FW" "$DEMO
+- 無：沒有錨點段，只有這一行"
+run_main "$FW"
+want_main '⬛ 沒有錨點段、只有「- 無：」⇒ 照樣 NG' "$([ "$RC" = 1 ] && has '沒有「## 錨點」段'; echo $?)"
 
 # ── 錨點 SHA 要剛好 40 碼：41 碼的十六進位串不是 SHA 固定連結 ──
 FS="$T/fx-s"; mkfx "$FS"; cfg_labels "$FS" '機器A,機器B'
@@ -471,6 +523,8 @@ run_nums "$FN" 1 9
 want_main '給了不存在的票號 ⇒ ?? 找不到' "$(grep -q "^?? .*${H}9 .*找不到" "$T/out"; echo $?)"
 run_nums "$FN" x1
 want_main '票號不是數字 ⇒ rc=2' "$([ "$RC" = 2 ]; echo $?)"
+run_nums "$FN" 004
+want_main '票號帶前導零（004）⇒ 當成 4 查、不靜默略過' "$([ "$RC" = 1 ] && grep -q "${H}4 .*格1" "$T/out"; echo $?)"
 
 # ── repo 設定的值去頭尾空白、機器標籤逐個去空白、帳號不分大小寫 ──
 FG="$T/fx-g"; mkfx "$FG" ',機器B'
