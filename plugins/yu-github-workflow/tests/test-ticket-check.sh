@@ -198,6 +198,13 @@ want_v5 NG "$NB" '**— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜�
 want_v5 NG "$NB" '> — 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
 want_v5 NG '> **— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x**' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
 want_v5 UNKNOWN "$NB" '結論如上 🔍 驗證｜機器A｜session PqrsTuvw'
+# 第 3 輪：🔍 後面沒空白仍是驗證署名（不可印「沒有驗證署名」）；施工署名前面帶 <sub>、清單符號 `- ` 照認
+want_v5 NG "$NB" '— 🔍驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
+want_v5 NG "$NB" '—🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
+want_v5 NG '— 🔨施工｜機器A｜session PqrsTuvw｜分支 x' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
+want_v5 NG '<sub>— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x</sub>' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
+want_v5 NG '- — 🔨 施工｜機器A｜session PqrsTuvw｜分支 x' '<sub>— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過</sub>'
+want_v5 OK '<sub>— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x</sub>' '- — 🔍 驗證｜機器B｜session KlmnOpqr｜分支 x｜結果：通過'
 
 # ══ 格 6：衍生（掛了 `衍生` ⇒ 上層必須是 SPEC） ══
 want_d6() {  # 期望（clean／NG） 上層票標題（空＝沒有上層） labels
@@ -257,6 +264,9 @@ want_refs '7'     "$(printf '````\n```\nCloses %s5\n```\n````\nCloses %s7' "$H" 
 want_refs '5'     'Closes https://github.com/example-org/app-one/issues/5'     # 寫票的網址也算（GitHub 認）
 want_refs '6'     'fixes https://github.com/Example-Org/App-One/issues/6'      # 網址大小寫不拘
 want_refs ''      'Closes https://github.com/example-org/other/issues/5'       # 別的 repo 的網址不算
+want_refs '5'     "$(printf '```x``` 是行內的 code span，不是圍欄\nCloses %s5' "$H")"   # 反引號圍欄的資訊字串不可含反引號
+want_refs '5'     "$(printf '```x```\nCloses %s5' "$H")"
+want_refs ''      "$(printf '```x\nCloses %s5\n```' "$H")"                 # ⬛ 對照：真的圍欄照樣不算
 
 # ══ 設定區塊解析 ══
 CFG_DOC="$(printf '%s\n' '# GitHub 工作流設定' '' '## 機器讀的欄位' '' '```text' \
@@ -497,6 +507,49 @@ setbody "$FW" "$DEMO
 - 無：沒有錨點段，只有這一行"
 run_main "$FW"
 want_main '⬛ 沒有錨點段、只有「- 無：」⇒ 照樣 NG' "$([ "$RC" = 1 ] && has '沒有「## 錨點」段'; echo $?)"
+
+# 第 3 輪：「無」的理由只有空白（含全形）或只有 -、程式碼圍欄裡的「無」⇒ 不算有理由；「無」又放沒釘 SHA 的檔案連結 ⇒ NG
+for v in '- 無：　' '- 無：-' '- 無： — '; do
+  setbody "$FW" "$DEMO
+## 錨點
+${v}"
+  run_main "$FW"
+  want_main "錨點「${v}」不算有理由 ⇒ NG、rc=1" "$([ "$RC" = 1 ] && has '錨點寫了「無」但沒寫理由'; echo $?)"
+done
+setbody "$FW" "$DEMO
+## 錨點
+\`\`\`text
+- 無：圍欄裡的不算
+\`\`\`"
+run_main "$FW"
+want_main '程式碼圍欄裡的「- 無：」不算 ⇒ 錨點沒有 SHA 固定連結、rc=1' "$([ "$RC" = 1 ] && has '錨點沒有 SHA 固定連結' && ! has '錨點 無：'; echo $?)"
+setbody "$FW" "$DEMO
+## 錨點
+- 無：只改設定
+- https://github.com/example-org/app-one/blob/main/a.sh"
+run_main "$FW"
+want_main '「無」又放了沒釘 SHA 的檔案連結 ⇒ NG、rc=1' "$([ "$RC" = 1 ] && grep -q '^NG .*沒釘 SHA 的檔案連結.*blob/main/a.sh' "$T/out"; echo $?)"
+
+# 第 3 輪：錨點連結的認法與 anchor-overlap 同一套（www.、大寫 host、/blame/、/raw/、raw 網域都算、都逐顆驗存在）
+FV="$T/fx-v"; mkfx "$FV"; cfg_labels "$FV" '機器A,機器B'
+for u in "https://www.github.com/example-org/app-one/blob/${SHA}/a.sh" "https://GitHub.com/example-org/app-one/blob/${SHA}/a.sh" \
+         "https://github.com/example-org/app-one/blame/${SHA}/a.sh" "https://raw.githubusercontent.com/example-org/app-one/${SHA}/a.sh"; do
+  setbody "$FV" "$DEMO
+## 錨點
+- ${u}"
+  rm -f "$FV/commit-$SHA"; : > "$FAKE_LOG"
+  run_main "$FV"
+  want_main "錨點 ${u%/${SHA}/a.sh} ⇒ 驗存在 1 顆、沒有 !!、rc=0" "$([ "$RC" = 0 ] && has '驗存在 1 顆' && ! grep -q '^!!' "$T/out" && grep -q "commits/$SHA" "$FAKE_LOG"; echo $?)"
+  echo 422 > "$FV/commit-$SHA"
+  run_main "$FV"
+  want_main "⬛ 同一條、SHA 422 ⇒ NG 不存在（真的有驗）" "$([ "$RC" = 1 ] && has '**不存在**'; echo $?)"
+done
+rm -f "$FV/commit-$SHA"
+setbody "$FV" "$DEMO
+$ANC
+- https://github.com/example-org/app-one/blob/main/b.sh"
+run_main "$FV"
+want_main '有 SHA 連結又有沒釘 SHA 的檔案連結 ⇒ 印 !!、那條沒被驗' "$([ "$RC" = 0 ] && grep -q '^!! .*blob/main/b.sh' "$T/out"; echo $?)"
 
 # ── 錨點 SHA 要剛好 40 碼：41 碼的十六進位串不是 SHA 固定連結 ──
 FS="$T/fx-s"; mkfx "$FS"; cfg_labels "$FS" '機器A,機器B'

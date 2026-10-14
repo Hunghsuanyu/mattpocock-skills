@@ -23,3 +23,21 @@ s/length(g) >= length(fence)/1/
 s/sub(\/\^https:\\\/\\\/github\\\.com\\\/\/, "", q); //
 s/v5="UNKNOWN 問不到留言/v5="OK 問不到留言/
 s/^    lunk=\$((lunk+unk)) /    : /
+# 第 3 輪：第二欄（TAB 分隔）是被突變的檔（相對 plugin 根目錄），沒有第二欄＝scripts/ticket-check.sh。
+#   前五行突變的是 lib/anchor-links.sh（與 anchor-overlap 共用）：同一顆突變要讓兩支測試都紅，證明兩邊吃同一份判法。
+#   依序：不認「- 無：」；理由只看空不空；圍欄裡的「無」也認；不認 www.；host 分大小寫。
+#   接著：「無」＋沒釘 SHA 的連結不判 NG；有 SHA 又有沒釘的連結不印 !!；🔍 後沒空白不補；<sub> 不剝；清單符號 `- ` 不剝；
+#   行首 ```x``` 當成圍欄開頭（格 7 的 Closes 漏掉）；最後兩行：🔨 後沒空白不補、破折號後沒空白不補。
+s/^        n = none_re.match(line)$/        n = None/	scripts/lib/anchor-links.sh
+s/none_empty\.fullmatch(v)/not v/	scripts/lib/anchor-links.sh
+s/^        fence = m.group(1); continue$/        pass/	scripts/lib/anchor-links.sh
+s/(?:www\\.)?//	scripts/lib/anchor-links.sh
+s/ + "\]+)", re.I)/ + "]+)")/	scripts/lib/anchor-links.sh
+s/^          if \[ -n "\$nopin" \]; then$/          if false; then/
+s/^    if \[ -n "\$nopin" \]; then$/    if false; then/
+s#x="${x//🔍驗證/🔍 驗證}"; ##
+s/'<'\*) \[\[ "\$x" =~ \$tag \]\] || break; x=.*/'<'*) break ;;/
+s/\[-+\]\[\[:space:\]\]\*)  x=/never-match*)  x=/
+s/if (!(substr(f, 1, 1) == ".*") > 0)) { fc/if (1) { fc/
+s#x="${x//🔨施工/🔨 施工}"; ##
+s|x="${x/#—🔍/— 🔍}"; ||

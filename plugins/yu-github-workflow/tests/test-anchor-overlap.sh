@@ -198,6 +198,13 @@ for v in '”' '…'; do
   run "$D" 30 31
   want "目錄連結結尾 ${v} 剝掉 ⇒ NG scripts/x.sh" "$([ "$RC" = 1 ] && hasline "NG ${H}30 ${H}31 example-org/app-one/scripts/x.sh" && endline; echo $?)"
 done
+# 目錄名整段是中文（「後面接中文就砍」的規則碰不到）⇒ 全形引號／刪節號只能靠標點表剝掉
+for v in '”' '…'; do
+  body "- 見「https://github.com/$R/tree/$S1/docs/審查證據${v}" > "$D/body-32"
+  body "$(link "$R" "$S2" docs/審查證據/x.md)" > "$D/body-33"
+  run "$D" 32 33
+  want "中文目錄連結結尾 ${v} 剝掉 ⇒ NG docs/審查證據/x.md" "$([ "$RC" = 1 ] && hasline "NG ${H}32 ${H}33 example-org/app-one/docs/審查證據/x.md" && endline; echo $?)"
+done
 
 # ⬛ 對照：檔名真的多一個「”」（百分比編碼寫出來）是另一個檔 ⇒ 不算交集（比對不吃語系的排序規則）
 body "$(printf -- '- [x](https://github.com/%s/blob/%s/a.sh%%E2%%80%%9D)\n' "$R" "$S1")" > "$D/body-22"
@@ -222,6 +229,44 @@ for v in "https://raw.githubusercontent.com/$R/refs/heads/main/a.sh" "https://ww
   want "抽不出 SHA：${v} ⇒ UNKNOWN、rc=2" "$([ "$RC" = 2 ] && has "UNKNOWN ${H}${k} - " && has "${v}" && endline; echo $?)"
   k=$((k+1))
 done
+
+# 結尾黏字（第 3 輪）：沒有副檔名的檔名直接接中文、`|`、`:行號` 剝掉；檔名本身結尾的 `_` 不剝
+D="$T/trail3"; mkdir -p "$D"
+k=2
+for v in "README的說明 README" "a.md| a.md" "a.md:10 a.md" "a.md:10-12。 a.md"; do
+  f="${v#* }"; w="${v%% *}"
+  body "$(link "$R" "$S2" "$f")" > "$D/body-1"
+  body "- 見 https://github.com/$R/blob/$S1/${w}" > "$D/body-$k"
+  run "$D" 1 "$k"
+  want "結尾黏字剝掉：${w} ⇒ NG ${f}" "$([ "$RC" = 1 ] && [ "$(ngs)" = 1 ] && hasline "NG ${H}1 ${H}${k} example-org/app-one/${f}" && endline; echo $?)"
+  k=$((k+1))
+done
+body "$(link "$R" "$S2" foo_)" > "$D/body-1"
+body "- 見 https://github.com/$R/blob/$S1/foo_" > "$D/body-$k"
+run "$D" 1 "$k"
+want '檔名結尾的 _ 不剝（前面沒有強調開頭）⇒ NG foo_' "$([ "$RC" = 1 ] && hasline "NG ${H}1 ${H}${k} example-org/app-one/foo_" && endline; echo $?)"
+
+# 錨點「- 無：<理由>」（與 ticket-check 同一套規則）：錨點檔清單為空 ⇒ 不與任何票重疊、不 UNKNOWN
+D="$T/none-r"; mkdir -p "$D"
+body "$(link "$R" "$S1" a.sh)" > "$D/body-1"
+body '- 無：這張只決定下一階段要開哪些票，不碰程式碼' > "$D/body-2"
+body '- 無: 查證票，只讀不改' > "$D/body-3"
+run "$D" 1 2 3
+want '錨點「- 無：理由」⇒ 錨點檔清單為空、rc=0、沒有 UNKNOWN' "$([ "$RC" = 0 ] && ! printf '%s\n' "$OUT" | grep -q '^UNKNOWN' && [ "$(ngs)" = 0 ] && endline; echo $?)"
+run "$D" 2
+want '單票只寫「- 無：理由」⇒ rc=0' "$([ "$RC" = 0 ] && endline; echo $?)"
+# 理由空白（含全形空白、只有 -）、程式碼圍欄裡的「無」⇒ 仍 UNKNOWN
+k=4
+for v in '- 無：' '- 無：　' '- 無：-' '- 無： - ' "$(printf '```text\n- 無：圍欄裡的不算\n```')"; do
+  body "$v" > "$D/body-$k"
+  run "$D" 1 "$k"
+  want "錨點「$(printf '%s' "$v" | tr '\n' ' ')」不算有理由 ⇒ UNKNOWN、rc=2" "$([ "$RC" = 2 ] && has "UNKNOWN ${H}1 ${H}${k}" && endline; echo $?)"
+  k=$((k+1))
+done
+# 「無」又放了沒釘 SHA 的檔案連結 ⇒ 照樣 UNKNOWN（抽不出 SHA 的連結不略過）
+body "$(printf -- '- 無：只改設定\n- https://github.com/%s/blob/main/b.sh' "$R")" > "$D/body-$k"
+run "$D" 1 "$k"
+want '「無」＋沒釘 SHA 的檔案連結 ⇒ UNKNOWN、rc=2' "$([ "$RC" = 2 ] && has "UNKNOWN ${H}${k} - " && has 'blob/main/b.sh' && endline; echo $?)"
 
 # 單票：讀不到、沒錨點段、錨點段沒連結 ⇒ 都不回 0
 D="$T/single"; mkdir -p "$D"; : > "$D/fail-body-1"
