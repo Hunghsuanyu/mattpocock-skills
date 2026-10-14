@@ -158,6 +158,13 @@ body "$(link "$R" "$S1" c.sh)" > "$D/body-2"
 run "$D" 1 2
 want '錨點段有抽不出 SHA 的 github 連結 ⇒ UNKNOWN、rc=2' "$([ "$RC" = 2 ] && has "UNKNOWN ${H}1" && has "blob/main/b.sh" && endline; echo $?)"
 
+# 非檔案的 github 連結（issue、pull、commit、留言）直接略過、不算 UNKNOWN；檔案連結照常比對
+D="$T/nonfile"; mkdir -p "$D"
+body "$(printf -- '- 依 https://github.com/%s/issues/%s#issuecomment-%s 的決定\n- https://github.com/%s/pull/%s\n- https://github.com/%s/commit/%s\n' "$R" 3 77 "$R" 4 "$R" "$S1"; link "$R" "$S1" a.sh)" > "$D/body-1"
+body "$(link "$R" "$S2" a.sh)" > "$D/body-2"
+run "$D" 1 2
+want 'issue／pull／commit／留言連結略過 ⇒ 沒有 UNKNOWN、照常比對出 NG' "$([ "$RC" = 1 ] && ! printf '%s\n' "$OUT" | grep -q '^UNKNOWN' && [ "$(ngs)" = 1 ] && endline; echo $?)"
+
 # tree/<sha>/<目錄> 與目錄下的檔算交集
 D="$T/tree"; mkdir -p "$D"
 body "$(printf -- '- [scripts](https://github.com/%s/tree/%s/scripts)\n' "$R" "$S1")" > "$D/body-1"

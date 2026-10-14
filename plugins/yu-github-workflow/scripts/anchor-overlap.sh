@@ -9,7 +9,8 @@
 #      抽出 `https://github.com/<owner>/<repo>/blob/<40 碼 SHA>/<路徑>`（檔）與 `.../tree/<40 碼 SHA>/<目錄>`（目錄）連結。
 #      同一個檔＝同一個 owner/repo（不分大小寫）＋同一個路徑；SHA 不同也算同一個檔，`?plain=1` 與 `#L…` 不算進路徑。
 #      連結結尾黏著的全形／半形標點、反引號、句點剝掉；百分比編碼解回來再比。
-#      錨點段裡抽不出 40 碼 SHA 的 github 連結（例如 `blob/main/…`）⇒ 那張票印 `UNKNOWN`，不略過。
+#      錨點段裡指向檔案（`/blob/`、`/tree/`）卻抽不出 40 碼 SHA 的 github 連結（例如 `blob/main/…`）⇒ 那張票印 `UNKNOWN`，不略過；
+#      不指向檔案的 github 連結（issue、pull、commit、留言）不是錨點，直接略過。
 #   2. 兩兩比對交集：同一個檔，或一邊是目錄、另一邊是目錄底下的檔（或子目錄）。沒有交集 ⇒ 不印。
 #   3. 有交集的一對，查兩個方向的 `issues/<n>/dependencies/blocked_by`（只看直接的擋，不追鏈）：
 #      任一方向有擋 ⇒ `OK`；兩個方向都沒有 ⇒ 每個共用檔印一行 `NG <a> <b> <檔>`。
@@ -52,6 +53,8 @@ out = []
 for u in url_re.findall(sys.stdin.buffer.read().decode("utf-8", "replace")):
     u = u.rstrip(".,;:!?")
     path = urllib.parse.unquote(re.split(r"[?#]", u.split("github.com/", 1)[1], 1)[0])
+    if not re.match(r"[^/]+/[^/]+/(blob|tree)/", path):
+        continue  # 不是指向檔案的連結（issue、pull、commit、留言）：不是錨點，略過
     m = re.match(r"([^/]+)/([^/]+)/(blob|tree)/([0-9a-f]{40})(?:/(.*))?$", path)
     rest = ((m.group(5) or "").rstrip("/")) if m else ""
     if not m or (m.group(3) == "blob" and not rest):
@@ -116,7 +119,7 @@ cnt=${#nums[@]}
 # 只跟一張票有關的 UNKNOWN：抽不出 SHA 的連結（每張票印一次）；只有一張票時，讀不到或沒錨點也在這裡印
 for n in "${nums[@]}"; do
   if [ -s "$AOV_TMP/bad-$n" ]; then
-    while IFS= read -r u; do printf 'UNKNOWN #%s - 錨點段有抽不出 40 碼 SHA 的 github 連結：%s\n' "$n" "$u"; done < "$AOV_TMP/bad-$n"
+    while IFS= read -r u; do printf 'UNKNOWN #%s - 錨點段有抽不出 40 碼 SHA 的檔案連結：%s\n' "$n" "$u"; done < "$AOV_TMP/bad-$n"
     unk=$((unk+1))
   fi
   if [ "$cnt" -eq 1 ] && [ -f "$AOV_TMP/why-$n" ]; then
