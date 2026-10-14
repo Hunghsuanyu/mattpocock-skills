@@ -1,3 +1,15 @@
 s/\*) ef=2 ;;/*) ef=1 ;;/
 s/"\$pbase" = "\$defb"/"$pbase" != "$defb"/
 s/else if (!c)/else if (0)/
+s/^    title="\$rtitle"$/    gh issue view "$n" --repo "$repo" --json title > "$tmp"; title="$rtitle"/
+s/sub(\/\[\[:space:]]+\$\/, "", v); print v/print v/
+s/machines=\$(trim_list "\$v")/machines="$v"/
+s/\[ "\$(lower "\$author")" != "\$lowner" \]/[ "$author" != "$owner" ]/
+s/\[ "\$oopen" -gt 0 \]/[ "$oopen" -lt 0 ]/
+s/want_n "\$n" || continue/true/
+s/END{exit !f}/END{exit 0}/
+s/''|\*\[!0-9]\*) usage ;;/'') usage ;;/
+s/if _same_id "\$vs" "\$bs"; then/if [ "$vk" = "$bk" ] \&\& _same_id "$vi" "$bi"; then/
+s/if \[ -z "\$e" \]; then \[ -n "\$unread" \] || unread="\$line"; else/if [ -z "$e" ]; then echo "UNKNOWN x"; return 0; else/
+s/f && !\/^#+ \/ && /f \&\& /
+s#grep -Eo '/(blob|tree)/\[0-9a-f]{40}(\[^0-9a-fA-F]|\$)'#grep -Eo '/(blob|tree)/[0-9a-f]{40}'#

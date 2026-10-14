@@ -2,12 +2,14 @@
 # 開票自檢：施工票的錨點（SHA 固定連結、那顆 SHA 真的存在）、標籤格 1～8、「做完能展示什麼」（格 9）。
 # 每格查什麼、判紅條件、三態意思：references/ticket-check.md。
 #
-# 用法：ticket-check.sh <owner/repo> [<owner/repo> ...]
-# 退出碼：0＝全過；1＝有 NG；2＝參數用錯。
+# 用法：ticket-check.sh <owner/repo> [票號 ...]
+#   給了票號只查那幾張（標籤、格 5～9、錨點都只查那幾張）；不給查整個 repo。
+# 退出碼：0＝全過；1＝有 NG；2＝參數用錯。正常跑完一定印 `--` 開頭的總結；沒有總結＝沒跑完（不是 NG）。
 #
 # repo 特有的值一律讀目標 repo 的 docs/agents/github.md（「機器讀的欄位」區塊，見 setup 的 repo 設定範本）：
 #   只檢查誰開的票、施工狀態記法、Project 所在、機器標籤名。
-#   讀不到設定 ⇒ 依賴設定的格子（3、4、8）印 UNKNOWN、不判紅；其他格照跑。
+#   值去頭尾空白；機器標籤名逐個去空白；帳號比對不分大小寫。
+#   讀不到「施工狀態記法」⇒ 格 3、8 印 UNKNOWN、不判；讀不到「機器標籤名」⇒ 格 3、4 不判；其他格照跑。
 #   環境變數 LABEL_OWNER 覆寫「只檢查誰開的票」；兩者都沒有 ⇒ 標籤格整個印 UNKNOWN（錨點與格 9 照跑）。
 #
 # 三態：OK＝問到了而且對；NG＝問到了而且不對；UNKNOWN（`??` 開頭）＝沒問到（離線、沒權限、限流、設定讀不到）。
@@ -163,10 +165,12 @@ pr_closing_refs() {
 #   新：`— 🔨 施工｜機器｜執行者｜分支`（第 3 欄＝執行者）
 #   舊：`— 🔨 施工軌｜機器｜軌號｜執行者｜分支`（角色以「軌」結尾；第 4 欄＝執行者）
 # 執行者：對話本身 `session <id>`；子代理 `agent-<id>@<派它的 session id>`（前面可有「施工子代理」等字）。
-# 判 NG 兩種：①同一個執行者 ②施工者是對話本身、驗證者是它派出的子代理。
-# 同一個對話派出的兩個子代理一施工一驗證 ⇒ OK。id 比對用「前綴相同」（8 碼與完整 id 視為同一個）。
+# 判 NG：施工與驗證的 session 部分相同（`session <id>` 的 id；`agent-<id>@<session>` 的 @ 後面）——
+#   同一個對話自己驗、驗自己派的子代理、或自己派的兩個子代理一施工一驗證，都是同一個對話在驗自己。
+# 多則驗證署名：任一則判得出自驗就 NG；讀不出執行者的那幾則不蓋掉它（沒有 NG 時才印 UNKNOWN）。
+# id 比對用「前綴相同」（8 碼與完整 id 視為同一個）。
 _same_id() { case "$1" in "$2"*) return 0 ;; esac; case "$2" in "$1"*) return 0 ;; esac; return 1; }
-_executor() {  # 署名行 ⇒ 印「agent <id> <父 session>」或「session <id> -」；讀不出來印空
+_executor() {  # 署名行 ⇒ 印「agent <id> <session>」或「session <id> <session>」；讀不出來印空
   local line="$1" rest f=() ef x
   rest="$line"
   while [[ "$rest" == *｜* ]]; do f+=("${rest%%｜*}"); rest="${rest#*｜}"; done
@@ -180,12 +184,12 @@ _executor() {  # 署名行 ⇒ 印「agent <id> <父 session>」或「session <i
   if [[ "$x" =~ agent-([A-Za-z0-9_-]+)@([A-Za-z0-9_-]+) ]]; then
     printf 'agent %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
   elif [[ "$x" =~ ^[[:space:]]*session[[:space:]]+([A-Za-z0-9_-]+) ]]; then
-    printf 'session %s -' "${BASH_REMATCH[1]}"
+    printf 'session %s %s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[1]}"
   fi
   return 0
 }
 self_verify_verdict() {
-  local line e builders=() verifiers=() b v bk bi vk vi vp nv=0
+  local line e builders=() verifiers=() b v bk bi bs vk vi vs nv=0 unread=''
   while IFS= read -r line; do
     case "$line" in
       '— 🔨 施工'*|'— 🔍 驗證'*) ;;
@@ -196,27 +200,25 @@ self_verify_verdict() {
       '— 🔨 施工'*) [ -z "$e" ] || builders+=("$e") ;;
       '— 🔍 驗證'*)
         nv=$((nv+1))
-        if [ -z "$e" ]; then echo "UNKNOWN 驗證署名讀不出執行者：$line"; return 0; fi
-        verifiers+=("$e") ;;
+        if [ -z "$e" ]; then [ -n "$unread" ] || unread="$line"; else verifiers+=("$e"); fi ;;
     esac
   done
   [ "$nv" -gt 0 ] || { echo "OK 沒有驗證署名"; return 0; }
-  [ "${#builders[@]}" -gt 0 ] || { echo "UNKNOWN 有驗證署名、但沒有讀得出執行者的施工署名可比"; return 0; }
-  for v in "${verifiers[@]}"; do
-    read -r vk vi vp <<<"$v"
-    for b in "${builders[@]}"; do
-      read -r bk bi _ <<<"$b"
-      if [ "$vk" = "$bk" ] && _same_id "$vi" "$bi"; then
-        echo "NG 驗證者 $vk $vi 就是施工者 $bk $bi"; return 0; fi
-      if [ "$bk" = session ] && [ "$vk" = agent ] && _same_id "$vp" "$bi"; then
-        echo "NG 驗證者 agent $vi 是施工對話 session $bi 派出的子代理"; return 0; fi
+  for v in ${verifiers[@]+"${verifiers[@]}"}; do
+    read -r vk vi vs <<<"$v"
+    for b in ${builders[@]+"${builders[@]}"}; do
+      read -r bk bi bs <<<"$b"
+      if _same_id "$vs" "$bs"; then
+        echo "NG 驗證者 ${vk} ${vi} 與施工者 ${bk} ${bi} 是同一個對話（session ${bs}）"; return 0; fi
     done
   done
+  [ -z "$unread" ] || { echo "UNKNOWN 驗證署名讀不出執行者：$unread"; return 0; }
+  [ "${#builders[@]}" -gt 0 ] || { echo "UNKNOWN 有驗證署名、但沒有讀得出執行者的施工署名可比"; return 0; }
   echo "OK 驗證者（${verifiers[*]}）與施工者（${builders[*]}）獨立"
 }
 
 # 格 9：施工票要有「做完能展示什麼」段，而且不是空的。stdin＝票內文。違規印一行，否則不印。
-# 段落＝標題行含「做完能展示什麼」的那一段，到下一個同級或更高級的標題為止；只有空白＝空的。
+# 段落＝標題行含「做完能展示什麼」的那一段，到下一個同級或更高級的標題為止；只有空白或只有子標題＝空的。
 demo_problem() {
   awk '
     match($0, /^#+ /) {
@@ -224,7 +226,7 @@ demo_problem() {
       if (f && lv <= sl) { f = 0; done = 1 }
       if (!done && !found && $0 ~ /做完能展示什麼/) { f = 1; found = 1; sl = lv; next }
     }
-    f && /[^[:space:]]/ { c = 1 }
+    f && !/^#+ / && /[^[:space:]]/ { c = 1 }   # 子標題本身不算內容
     END {
       if (!found) print "格9 沒有「做完能展示什麼」段"
       else if (!c) print "格9 「做完能展示什麼」段是空的"
@@ -245,10 +247,16 @@ cfg_block() {
     inb && /^```/ { stop = 1; next }
     inb { print }'
 }
-# 參數：區塊內容、欄位名。印值（欄位名後接半形冒號與一個空格，逐字比對）；沒有這個欄位印空。
+# 參數：區塊內容、欄位名。印值（行首是欄位名接半形冒號，逐字比對；值去頭尾空白）；沒有這個欄位印空。
 cfg_get() {
-  printf '%s\n' "$1" | awk -v k="$2: " '!d && index($0, k) == 1 { print substr($0, length(k) + 1); d = 1 }'
+  printf '%s\n' "$1" | awk -v k="$2:" '!d && index($0, k) == 1 {
+    v = substr($0, length(k) + 1); sub(/^[[:space:]]+/, "", v); sub(/[[:space:]]+$/, "", v); print v; d = 1 }'
 }
+# 逗號分隔的清單逐個去頭尾空白、丟掉空項。
+trim_list() {
+  printf '%s\n' "$1" | tr ',' '\n' | awk '{ sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, "") } NF' | paste -sd, -
+}
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 # 一個 repo 一次 GraphQL：每張開著的票 `<票號>\t<Status｜（未設）｜NONE>`（NONE＝不在那個 Project）。
 # 參數：owner/repo、Project 擁有者、Project 號碼。失敗 ⇒ 非 0 退出（呼叫端印 UNKNOWN，不能當成「都不在 Project」）。
@@ -273,13 +281,23 @@ ticket_pstatus() {  # ok（1＝問得到）、project_status_rows 的輸出、�
 # 被 source 時只提供函式、不跑主體（給 tests/ 用）。
 [ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
-[ $# -ge 1 ] || { echo "用法：$0 <owner/repo> [...]" >&2; exit 2; }
+usage() { echo "用法：$0 <owner/repo> [票號 ...]" >&2; exit 2; }
+[ $# -ge 1 ] || usage
+repo="$1"; shift
+case "$repo" in */*) ;; *) usage ;; esac
+only=''   # 空＝查整個 repo；否則「 號 號 」
+for x in "$@"; do
+  x="${x#\#}"
+  case "$x" in ''|*[!0-9]*) usage ;; esac
+  only="${only:- } $x "
+done
+want_n() { [ -z "$only" ] || case "$only" in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 tmp=$(mktemp); errf=$(mktemp); trap 'rm -f "$tmp" "$errf"' EXIT
 bad=0; total=0; b9=0
 seen_ok=''; seen_ng=''
-lbad=0; lunk=0; lopen=0; lclosed=0; lother=0
+lbad=0; lunk=0; lopen=0; lclosed=0; lother=0; oopen=0
 
-for repo in "$@"; do
+{
   short="${repo##*/}"
 
   # ── repo 設定：讀不到就讓依賴它的格子印 UNKNOWN，不猜預設值 ──
@@ -296,7 +314,7 @@ for repo in "$@"; do
     v=$(cfg_get "$cfg" 施工狀態記法)
     case "$v" in labels|project) mode="$v" ;; esac
     v=$(cfg_get "$cfg" 機器標籤名)
-    case "$v" in 無) machines='' ;; ''|見*) ;; *) machines="$v" ;; esac
+    case "$v" in 無) machines='' ;; ''|見*) ;; *) machines=$(trim_list "$v") ;; esac
     if [ "$mode" = project ]; then
       v=$(cfg_get "$cfg" 'Project 所在')
       if [[ "$v" =~ ^([A-Za-z0-9][A-Za-z0-9-]*)[^A-Za-z0-9]+([0-9]+)$ ]]; then
@@ -308,8 +326,13 @@ for repo in "$@"; do
       case "$v" in ''|未設定|見*) ;; *) owner="$v" ;; esac
     fi
   fi
-  if [ "$mode" = '?' ] || [ "$machines" = '?' ]; then
-    printf '?? %-14s repo 設定缺「施工狀態記法」或「機器標籤名」，格 3、4、8 不判\n' "$short"
+  # 實際不判哪幾格：記法讀不到 ⇒ 格 3、8；機器標籤名讀不到 ⇒ 格 3、4。
+  skipc=''
+  case "$mode:$machines" in
+    '?:?') skipc='3、4、8' ;; '?:'*) skipc='3、8' ;; *':?') skipc='3、4' ;;
+  esac
+  if [ -n "$skipc" ]; then
+    printf '?? %-14s repo 設定缺「施工狀態記法」或「機器標籤名」，格 %s 不判\n' "$short" "$skipc"
     lunk=$((lunk+1))
   fi
 
@@ -356,18 +379,26 @@ for repo in "$@"; do
     fi
   fi
 
+  # 每張開著的票的內文（錨點、格 7、格 9 都用）與 GitHub 原生登記的「會關它的 PR」：一個 repo 一次 GraphQL，不逐票 issue view。
+  # 問不到 ⇒ 錨點與格 9 每張印 UNKNOWN、格 7 整個 repo 印 UNKNOWN。
+  arc=0; body_ok=0
+  closers=$(gh api graphql --paginate -F o="${repo%%/*}" -F r="${repo##*/}" -f query='
+    query($o:String!,$r:String!,$endCursor:String){repository(owner:$o,name:$r){
+      issues(first:100,after:$endCursor,states:OPEN){pageInfo{hasNextPage endCursor}
+        nodes{number body closedByPullRequestsReferences(first:25,includeClosedPrs:false){nodes{number}}}}}}' \
+    --jq '.data.repository.issues.nodes[]|[.number,([.closedByPullRequestsReferences.nodes[].number|"#\(.)"]|join(",")),(.body|@base64)]|@tsv' 2>"$errf") || arc=$?
+  if [ "$arc" = 0 ]; then body_ok=1; else
+    printf '?? %-14s 問不到開著的票內文，錨點、格 7、格 9 不查（%s）\n' "$short" "$(tr '\n' ' ' <"$errf")"
+    lunk=$((lunk+1))
+  fi
+
   # 格 7 要「哪些開著的 PR 合併時會關這張票」，兩個來源取聯集：
   #   ① GitHub 原生的 closedByPullRequestsReferences（PR 寫關閉關鍵字、或從 gh issue develop 開的分支）
   #   ② 整合 PR：開著、目標是預設分支的 PR，內文用關閉關鍵字指到的票（pr_closing_refs）
   # 任一個問不到 ⇒ 格 7 整個 repo 印 UNKNOWN——不能當成「沒有 PR 會關它」（那是假綠）。
-  closers=''; prrefs=''; cl_ok=0
-  if [ "$lab_on" = 1 ]; then
+  prrefs=''; cl_ok=0
+  if [ "$lab_on" = 1 ] && [ "$body_ok" = 1 ]; then
     arc=0
-    closers=$(gh api graphql --paginate -F o="${repo%%/*}" -F r="${repo##*/}" -f query='
-      query($o:String!,$r:String!,$endCursor:String){repository(owner:$o,name:$r){
-        issues(first:100,after:$endCursor,states:OPEN){pageInfo{hasNextPage endCursor}
-          nodes{number body closedByPullRequestsReferences(first:25,includeClosedPrs:false){nodes{number}}}}}}' \
-      --jq '.data.repository.issues.nodes[]|[.number,([.closedByPullRequestsReferences.nodes[].number|"#\(.)"]|join(",")),(.body|@base64)]|@tsv' 2>"$errf") || arc=$?
     defb=''
     [ "$arc" != 0 ] || defb=$(gh api "repos/$repo" --jq .default_branch 2>"$errf") || arc=$?
     pulls=''
@@ -396,13 +427,23 @@ for repo in "$@"; do
            --jq '.[]|select(.pull_request==null)|[.number,.state,.user.login,.title,([.labels[].name]|join(","))]|@tsv' 2>"$errf") || arc=$?
   if [ "$arc" != 0 ]; then
     printf '?? %-14s 問不到票清單（%s）\n' "$short" "$(tr '\n' ' ' <"$errf")"
-    lunk=$((lunk+1)); continue
+    lunk=$((lunk+1)); rows=''
   fi
+  # 給了票號：清單裡找不到的票號印 UNKNOWN（打錯號、或那是 PR）。
+  if [ -n "$rows" ]; then
+    for x in $only; do
+      printf '%s\n' "$rows" | awk -F'\t' -v n="$x" '$1==n{f=1} END{exit !f}' \
+        || { printf '?? %-14s#%-3s 找不到這張票（不在票清單裡；PR 不算票）\n' "$short" "$x"; lunk=$((lunk+1)); }
+    done
+  fi
+  lowner=$(lower "$owner")
   # fd 3：迴圈裡的 gh 不可以吃到這份清單的 stdin。
   while IFS=$'\t' read -r -u 3 n state author rtitle labels; do
     [ -n "$n" ] || continue
-    if [ "$lab_on" = 1 ] && [ "$author" != "$owner" ]; then
+    want_n "$n" || continue
+    if [ "$lab_on" = 1 ] && [ "$(lower "$author")" != "$lowner" ]; then
       lother=$((lother+1))
+      [ "$state" != open ] || oopen=$((oopen+1))
     elif [ "$lab_on" = 1 ]; then
       ps=''
       [ "$state" = open ] && [ "$mode" = project ] && ps=$(ticket_pstatus "$ps_ok" "$pstat" "$n")
@@ -453,16 +494,22 @@ for repo in "$@"; do
     fi
     [ "$state" = open ] || continue
 
-    gh issue view "$n" --repo "$repo" --json title,body --jq '.title, " ", .body' > "$tmp"
-    title=$(head -1 "$tmp")
+    title="$rtitle"
     # SPEC、外審與指揮台沒有程式碼錨點，也不是施工票——跳過，但印出來讓人看得見跳了誰。
     if anchor_skip_title "$title"; then
       printf '  skip %-14s#%-3s %s\n' "$short" "$n" "$title"; continue
     fi
+    [ "$body_ok" = 1 ] || continue   # 內文問不到：repo 層已印 ??
+    crow=$(printf '%s\n' "$closers" | awk -F'\t' -v n="$n" '!d && $1==n{print; d=1}')
+    if [ -z "$crow" ]; then
+      printf '?? %-14s#%-3s 問不到這張票的內文，錨點與格 9 不查 — %s\n' "$short" "$n" "$title"
+      lunk=$((lunk+1)); continue
+    fi
+    printf '%s' "$crow" | cut -f3 | base64 -d > "$tmp"
     total=$((total+1))
 
     # 格 9：做完能展示什麼
-    p9=$(tail -n +3 "$tmp" | demo_problem)
+    p9=$(demo_problem < "$tmp")
     if [ -n "$p9" ]; then
       printf 'NG %-14s#%-3s %s — %s\n' "$short" "$n" "$p9" "$title"
       b9=$((b9+1))
@@ -477,7 +524,7 @@ for repo in "$@"; do
     # 先 -o 攤成一行一條再數行（`grep -c` 數的是行數，一行兩個連結只算 1）。
     # grep 沒命中回 1，set -e ＋ pipefail 會讓整支靜靜死掉——`|| true` 是必須的。
     sha=$(printf '%s' "$anc" \
-      | { grep -Eo '/(blob|tree)/[0-9a-f]{40}' || true; } \
+      | { grep -Eo '/(blob|tree)/[0-9a-f]{40}([^0-9a-fA-F]|$)' || true; } \
       | { grep -c . || true; })
     if [ "$sha" = 0 ]; then
       printf 'NG %-14s#%-3s 錨點沒有 SHA 固定連結 — %s\n' "$short" "$n" "$title"
@@ -487,7 +534,8 @@ for repo in "$@"; do
     # ── 形狀對不代表那顆存在：逐顆問 GitHub ──
     # 去重前後分開數：同一顆 SHA 的不同檔只問一次，但對照組要用去重前的條數。
     urls_raw=$(printf '%s' "$anc" \
-      | { grep -Eo 'https://github\.com/[^/ )]+/[^/ )]+/(blob|tree)/[0-9a-f]{40}' || true; })
+      | { grep -Eo 'https://github\.com/[^/ )]+/[^/ )]+/(blob|tree)/[0-9a-f]{40}([^0-9a-fA-F]|$)' || true; } \
+      | sed -E 's/[^0-9a-fA-F]$//')
     urls=$(printf '%s' "$urls_raw" | sort -u)
     # ⚠️ 不可以寫成 `[ -n "$urls" ] && nurl=$(…)`：set -e 之下 urls 為空時整式回 1，整支靜靜終止。
     nurl=0
@@ -544,7 +592,12 @@ EOF
         "$short" "$n" "$sha" "$nuniq" "$((nuniq-unk))" "$unk"
     fi
   done 3<<<"$rows"
-done
+  # 有開著的票、卻沒有一張是設定的帳號開的 ⇒ 帳號多半設錯（全部「別人開的、不查」看起來跟全過一樣）。
+  if [ "$lab_on" = 1 ] && [ "$lopen" = 0 ] && [ "$oopen" -gt 0 ]; then
+    printf '?? %-14s 開著的票 %s 張，沒有一張是 %s 開的（「只檢查誰開的票」設對了嗎？）\n' "$short" "$oopen" "$owner"
+    lunk=$((lunk+1))
+  fi
+}
 
 echo "--"
 echo "施工票 $total 張，缺錨點／缺 SHA／SHA 不存在 $bad 張，缺或空「做完能展示什麼」$b9 張"
