@@ -20,7 +20,7 @@
 
 - 驗證等級一律 `重驗證-外審`：`main` 是所有機器的部署線，hook 會在每個對話執行。整段改動收齊後送換廠牌的外部審查，通過才開 PR。
 - 一律用 merge commit 合併，不用 squash、不用 rebase merge。其他地方用 SHA 固定連結指到施工分支的 commit，squash 會讓那些 SHA 不在 `main` 的歷史裡。
-- 公開 repo 的 PR 與 commit 訊息不寫私有 repo 的票號，所以不用 `Closes` 關私有票；合併後由開票的人逐張關。
+- 公開 repo 的 PR 與 commit 訊息不寫私有 repo 的票號，所以不用 `Closes` 關私有票；合併後由指揮台逐張關。
 - 合併只由擁有者按。
 
 ## 外洩檢查
@@ -28,6 +28,7 @@
 這是公開 repo，寫進來的檔與 commit 訊息只能有通用規則：不寫私有 repo 名、票號、人名、事件、本機路徑、內部識別字。作者信箱用 GitHub 的 noreply 信箱。
 
 - 推送前有本機 pre-push hook 掃描新增行、commit 訊息與作者信箱，命中就擋。不要用 `--no-verify` 繞過。
-- 只有裝了這支 hook 的機器才推 fork。CI 端的同一道掃描上線前，這是唯一一道防線。
+- 只有裝了這支 hook 的機器才推 fork。
+- CI 端另有 `leak-scan` workflow（`.github/workflows/leak-scan.yml`），push 與 PR 都掃新增內容；關鍵詞清單放在 repo secret。它在推送**之後**才跑，命中時內容已經公開，只能事後偵測、補救；推送前擋下仍只靠本機 hook。
 - 掃描的關鍵詞清單本身就是私有資料，不放在這個 repo。
 - 測試夾具需要像票號的字串時，在執行時組出來（例如 `printf 'Closes #%s' 5`），不要直接寫進檔案。
