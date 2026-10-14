@@ -13,3 +13,12 @@ s/if _same_id "\$vs" "\$bs"; then/if [ "$vk" = "$bk" ] \&\& _same_id "$vi" "$bi"
 s/if \[ -z "\$e" \]; then \[ -n "\$unread" \] || unread="\$line"; else/if [ -z "$e" ]; then echo "UNKNOWN x"; return 0; else/
 s/f && !\/^#+ \/ && /f \&\& /
 s#grep -Eo '/(blob|tree)/\[0-9a-f]{40}(\[^0-9a-fA-F]|\$)'#grep -Eo '/(blob|tree)/[0-9a-f]{40}'#
+s/print (v == "" ? "EMPTY" : "R " v)/print "R " v/
+s/'R '\*) printf '   %-14s#%-3s 錨點 無/'R-never'*) printf '   %-14s#%-3s 錨點 無/
+s/^    line=\$(_sig_strip "\$line")$/    :/
+s/^      \*'🔍 驗證'\*) nv=/      *'never-match'*) nv=/
+s/^  x=\$((10#\$x)) /  : /
+s/\*'HTTP 422'\*|\*'No commit found'\*)/*'HTTP 404'*|*'HTTP 422'*|*'No commit found'*)/
+s/length(g) >= length(fence)/1/
+s/sub(\/\^https:\\\/\\\/github\\\.com\\\/\/, "", q); //
+s/v5="UNKNOWN 問不到留言/v5="OK 問不到留言/
