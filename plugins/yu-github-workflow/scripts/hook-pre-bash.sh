@@ -10,7 +10,7 @@ hc_read || exit 0
 msg=''
 if hc_is_issue_create "${HC_CMD}"; then
   hc_ledger pre-issue-create "${HC_CMD}"
-  msg='[yu-github-workflow] 開票提醒：施工中的對話不開票——計畫外的新事記到 SPEC 的「尚未定義」，並在 SPEC 留言通知開票的人（🔴 不能等的例外照入口 skill github-workflow）。指揮台開票照拆票 skill to-tickets：類型／優先／驗證標籤各一個、內文走 --body-file、施工票補設被外審票擋（--add-blocked-by）。'
+  msg='[yu-github-workflow] 開票提醒：施工中的對話不開票——計畫外的新事在 SPEC 留言，由指揮台寫進「尚未定義」（🔴 不能等的例外照入口 skill github-workflow）。指揮台開票照拆票 skill to-tickets：類型／優先／驗證標籤各一個、內文走 --body-file、施工票補設被外審票擋（--add-blocked-by）。'
 fi
 if hc_is_pr_create "${HC_CMD}"; then
   hc_ledger pre-pr-create "${HC_CMD}"
