@@ -9,7 +9,9 @@
 #   （例：gh issue view --json url -q .url），分不出哪張是剛開的 ⇒ 不跑，明講。
 #   不退回 -R／--repo 參數，也不從 cwd 推：建票失敗時拿參數去自檢，會對著沒開成的票報 NG 或全過；
 #   clone 有兩個 remote 時從 cwd 推，會對著別的 repo 報全過。沒有那一行＝沒開成或沒讀到 → 不跑，明講沒跑。
+#   同一張票的網址印了兩次（`u=$(gh issue create …) && gh issue edit "$u" …`）先去重再數。
 #   自檢沒印 `--` 總結＝沒跑完：明講，不當成 NG（退出碼此時不是檢查結果）。
+#   退出碼 0 但有 `??`（沒問到）或 `!!`（有錨點沒被驗存在）⇒ 不寫「全過」，講各有幾處。
 # 開完 PR → 從輸出取 PR 網址，回查 GitHub 登記的關票清單（closingIssuesReferences）
 #   與內文的關閉關鍵字是否同一組票；內文那組用 ticket-check.sh 的 pr_closing_refs（同一個判法，只比本 repo 的票）。
 #   不同就提示（目標不是預設分支，GitHub 不登記；從 gh issue develop 開的分支，內文沒寫也會關票）。
@@ -25,10 +27,10 @@ NL='
 '
 
 hpo_issue() {
-  local urls nurl ncreate repos repo nums out rc label_ng cell_ng other_ng nunk shown msg=''
+  local urls nurl ncreate repos repo nums out rc label_ng cell_ng other_ng nunk nbang shown note msg=''
   urls="$(printf '%s\n' "${HC_OUT}" | tr -d '\r' \
     | { grep -Ex '[[:space:]]*https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[0-9]+[[:space:]]*' || true; } \
-    | tr -d ' \t')"
+    | tr -d ' \t' | awk '!s[$0]++')"   # 同一張票的網址印了兩次（u=$(gh issue create …) 之後 echo／edit 它）只算一次
   if [ -z "${urls}" ]; then
     printf '%s' "${TAG} 開票自檢未執行：沒有讀到 gh issue create 印出的票網址（可能沒開成）。開成了就自己跑 ticket-check.sh <owner/repo> <票號>。"
     return
@@ -53,10 +55,15 @@ hpo_issue() {
     cell_ng="$(printf '%s\n' "${out}" | grep -E '^NG .* 標籤 格[3-8] ' || true)"
     other_ng="$(printf '%s\n' "${out}" | grep -E '^NG ' | grep -vE '^NG .* 標籤 格[0-9]' || true)"
     nunk="$(printf '%s\n' "${out}" | awk '/^--$/ { exit } /^\?\? / { n++ } END { print n + 0 }')"
+    nbang="$(printf '%s\n' "${out}" | awk '/^--$/ { exit } /^!! / { n++ } END { print n + 0 }')"
     # 只放 NG／??／!! 與結尾摘要；OK 的票一張一行，放進來只會把要看的淹掉。
     shown="$(printf '%s\n' "${out}" | awk '/^--$/ { tail = 1; next } tail || /^(NG|\?\?|!!) /')"
-    if [ "${rc}" -eq 0 ] && [ "${nunk}" -gt 0 ]; then
-      msg+="${TAG} 開完票了——開票自檢（${repo} ${nums}）沒有 NG，但有 ${nunk} 處讀不到（?? 行，那幾格沒查）。${NL}${shown}${NL}"
+    if [ "${rc}" -eq 0 ] && [ $((nunk + nbang)) -gt 0 ]; then
+      # ??＝沒問到；!!＝兩把尺對不上、有錨點沒被驗存在。兩樣都不是 NG，但都不可以寫成「全過」。
+      note=''
+      [ "${nunk}" -eq 0 ] || note="${nunk} 處讀不到（?? 行，那幾格沒查）"
+      [ "${nbang}" -eq 0 ] || note="${note:+${note}、}${nbang} 處 !!（有錨點沒被驗存在）"
+      msg+="${TAG} 開完票了——開票自檢（${repo} ${nums}）沒有 NG，但有 ${note}。${NL}${shown}${NL}"
     elif [ "${rc}" -eq 0 ]; then
       msg+="${TAG} 開完票了——開票自檢（${repo} ${nums}）全過。${NL}${shown}${NL}"
     else

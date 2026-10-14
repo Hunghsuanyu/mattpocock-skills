@@ -92,6 +92,8 @@ done
 hook pre 'gh issue create --title t'
 c_pre_text() { has '在 SPEC 留言，由指揮台寫進' && ! has '記到 SPEC'; }
 verdict 'pre 開票：計畫外的新事在 SPEC 留言、由指揮台寫進' c_pre_text
+c_pre_none() { has '錨點寫 `- 無：<理由>`'; }
+verdict 'pre 開票：提醒真的不改檔的票錨點寫「- 無：<理由>」' c_pre_none
 c_ledger_issue() { grep -qE $'\tpre-issue-create\tgh$' "${LEDGER}"; }
 verdict 'pre 開票：帳本記一行、第一個字詞是 gh' c_ledger_issue
 hook pre 'GH_TOKEN=sekret-value gh issue create --title t'
@@ -181,6 +183,15 @@ printf '%s\n' "?? repo-d        ${H}12  格5 問不到留言（HTTP 502）" "?? 
 hook post 'gh issue create --title t' "$(create_out --title t)"
 c_unk() { has '沒有 NG，但有 2 處讀不到' && ! has '全過'; }
 verdict '開票自檢：rc=0 但有 ?? ⇒ 不寫全過、講幾處讀不到' c_unk
+# 退出碼 0 但只有 !!（有錨點沒被驗存在）⇒ 也不寫「全過」，講有幾處對不上
+printf '%s\n' "!! repo-d        ${H}12  形狀 2 條、抽得出網址 1 條 ⇒ 有 1 條沒被驗存在" '--' 'x' > "${TC_OUT}"
+hook post 'gh issue create --title t' "$(create_out --title t)"
+c_bang() { has '1 處 !!' && has '形狀 2 條' && ! has '全過'; }
+verdict '開票自檢：rc=0 只有 !! ⇒ 不寫全過、講幾處沒被驗' c_bang
+printf '%s\n' "?? repo-d        ${H}12  格5 問不到留言（HTTP 502）" "!! repo-d        ${H}12  形狀 2 條、抽得出網址 1 條" '--' 'x' > "${TC_OUT}"
+hook post 'gh issue create --title t' "$(create_out --title t)"
+c_unk_bang() { has '1 處讀不到' && has '1 處 !!' && ! has '全過'; }
+verdict '開票自檢：rc=0 有 ?? 也有 !! ⇒ 兩樣都講' c_unk_bang
 printf '%s\n' "   repo-d        ${H}12  標籤 OK（一般票）" '--' 'x' > "${TC_OUT}"
 # 同一次 Bash 裡別的指令也印了整行的票網址 ⇒ 分不出哪張是剛開的、不跑
 hook post 'gh issue view 3 -R own-x/repo-y --json url -q .url && gh issue create --title t' \
@@ -195,6 +206,11 @@ verdict '開票自檢：⬛ 開兩次、兩行網址 ⇒ 兩張都查' c_two
 hook post 'for t in a b; do gh issue create --title "$t"; done' \
   "$(create_out --title a)${NL}https://github.com/own-c/repo-d/issues/13"
 verdict '開票自檢：⬛ 迴圈裡開票 ⇒ 兩張都查' c_two
+# 同一張票的網址印了兩次（u=$(gh issue create …) && gh issue edit "$u" … 之類）⇒ 先去重，照樣只查那一張
+hook post 'u=$(gh issue create --title t) && echo "$u" && gh issue edit "$u" --add-label x' \
+  "$(create_out --title t)${NL}https://github.com/own-c/repo-d/issues/12"
+c_dup() { c_called 'own-c/repo-d 12' && ! has '開票自檢未執行'; }
+verdict '開票自檢：同一張票的網址印兩次 ⇒ 去重後照查' c_dup
 # 指令整體失敗（PostToolUseFailure）：payload 照實測形狀（沒有 tool_response，輸出在頂層 error）
 hookf() { # hookf <指令> <error 欄>
   : > "${FAKE_LOG}"; : > "${TC_LOG}"; : > "${LEDGER}"

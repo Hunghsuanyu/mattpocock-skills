@@ -27,3 +27,7 @@ s/grep -E '\^NG \.\* 標籤 格\[12\] '/grep -E '^NG .* 標籤 格[0-9] '/	scrip
 # 第 28 行起（第 2 輪補）：PostToolUseFailure 認得失敗事件、改讀 error 當輸出，各一發。
 s/PostToolUseFailure) HC_FAILED=1 ;;/PostToolUseFailure) ;;/	scripts/lib/hook-common.sh
 s/if .tool_response == null then (.error \/\/ "" | tostring)/if false then ""/	scripts/lib/hook-common.sh
+# 第 3 輪：同一張票的網址印兩次不去重（「去重後照查」要紅）；rc=0 只數 ??、不數 !!（「只有 !!」兩案要紅）；開票提醒拿掉「- 無：<理由>」那句。
+s/ | awk '!s\[\$0\]++')"   # 同一張票/)"   # 同一張票/	scripts/hook-post-bash.sh
+s/\[ \$((nunk + nbang)) -gt 0 \]/[ "${nunk}" -gt 0 ]/	scripts/hook-post-bash.sh
+s/；真的不改檔的票，錨點寫 .- 無：<理由>.。/。/	scripts/hook-pre-bash.sh
