@@ -56,6 +56,7 @@ run() {  # 夾具目錄 票號…
   OUT=$(FX="$d" bash "$TAO_SCRIPT" "$R" "$@" 2>&1); RC=$?
 }
 has() { printf '%s\n' "$OUT" | grep -Fq -- "$1"; }
+hasline() { printf '%s\n' "$OUT" | grep -Fxq -- "$1"; } # 整行相等（路徑後面多黏一個字也要分得出來）
 ngs() { printf '%s\n' "$OUT" | { grep -c '^NG' || true; }; }
 want() {  # 名稱 條件結果（0＝過）
   if [ "$2" = 0 ]; then pass=$((pass+1)); printf '   ✔ %s\n' "$1"
@@ -172,6 +173,55 @@ body "$(link "$R" "$S2" scripts/lib/x.sh)" > "$D/body-2"
 body "$(link "$R" "$S2" scriptsx/y.sh)" > "$D/body-3"
 run "$D" 1 2 3
 want 'tree 目錄與目錄下的檔 ⇒ 交集、NG；同前綴的別的目錄不算' "$([ "$RC" = 1 ] && [ "$(ngs)" = 1 ] && has "NG ${H}1 ${H}2 example-org/app-one/scripts/lib/x.sh" && ! has "${H}3 " && endline; echo $?)"
+
+# 結尾黏著的 Markdown 強調、全形引號／波浪號／刪節號、緊接的中文字 ⇒ 剝掉再比（各自與乾淨的 a.sh 比）
+D="$T/trail"; mkdir -p "$D"
+U="https://github.com/$R/blob/$S1/a.sh"
+body "$(link "$R" "$S2" a.sh)" > "$D/body-1"
+k=2
+for v in "**${U}**" "「${U}”" "${U}～" "__${U}__" "${U}…" "${U}的說明" "${U}**。" "${U}（v1.2）"; do
+  body "- 見 ${v}" > "$D/body-$k"
+  run "$D" 1 "$k"
+  want "結尾字元剝掉：${v#*a.sh} ⇒ NG a.sh" "$([ "$RC" = 1 ] && [ "$(ngs)" = 1 ] && hasline "NG ${H}1 ${H}${k} example-org/app-one/a.sh" && endline; echo $?)"
+  k=$((k+1))
+done
+# ⬛ 對照：路徑本身有中文、而且中文後面還有副檔名 ⇒ 不砍
+body "$(link "$R" "$S2" 'docs/v1.2版說明.md')" > "$D/body-20"
+body "- 見 https://github.com/$R/blob/$S1/docs/v1.2版說明.md" > "$D/body-21"
+run "$D" 20 21
+want '⬛ 對照：路徑裡的中文不被當成結尾砍掉' "$([ "$RC" = 1 ] && [ "$(ngs)" = 1 ] && hasline "NG ${H}20 ${H}21 example-org/app-one/docs/v1.2版說明.md" && endline; echo $?)"
+
+# 目錄連結（沒有副檔名可以砍）結尾黏著全形引號／刪節號 ⇒ 也要剝掉
+for v in '”' '…'; do
+  body "- 見「https://github.com/$R/tree/$S1/scripts${v}" > "$D/body-30"
+  body "$(link "$R" "$S2" scripts/x.sh)" > "$D/body-31"
+  run "$D" 30 31
+  want "目錄連結結尾 ${v} 剝掉 ⇒ NG scripts/x.sh" "$([ "$RC" = 1 ] && hasline "NG ${H}30 ${H}31 example-org/app-one/scripts/x.sh" && endline; echo $?)"
+done
+
+# ⬛ 對照：檔名真的多一個「”」（百分比編碼寫出來）是另一個檔 ⇒ 不算交集（比對不吃語系的排序規則）
+body "$(printf -- '- [x](https://github.com/%s/blob/%s/a.sh%%E2%%80%%9D)\n' "$R" "$S1")" > "$D/body-22"
+run "$D" 1 22
+want '⬛ 對照：a.sh 與 a.sh” 是不同檔 ⇒ rc=0、沒有 NG' "$([ "$RC" = 0 ] && [ "$(ngs)" = 0 ] && endline; echo $?)"
+
+# 其他寫法的檔案連結：www、大寫 host、/blame/、/raw/、raw.githubusercontent.com ⇒ 照同一套 SHA 規則算錨點
+D="$T/hosts"; mkdir -p "$D"
+body "$(link "$R" "$S2" a.sh)" > "$D/body-1"
+k=2
+for v in "https://www.github.com/$R/blob/$S1/a.sh" "https://GitHub.com/$R/blob/$S1/a.sh" \
+         "https://github.com/$R/blame/$S1/a.sh" "https://github.com/$R/raw/$S1/a.sh" \
+         "https://raw.githubusercontent.com/$R/$S1/a.sh"; do
+  body "- ${v}" > "$D/body-$k"
+  run "$D" 1 "$k"
+  want "檔案連結 ${v%%/$R*}…${v#*$R/} ⇒ NG a.sh" "$([ "$RC" = 1 ] && [ "$(ngs)" = 1 ] && hasline "NG ${H}1 ${H}${k} example-org/app-one/a.sh" && endline; echo $?)"
+  k=$((k+1))
+done
+for v in "https://raw.githubusercontent.com/$R/refs/heads/main/a.sh" "https://www.github.com/$R/blob/main/a.sh"; do
+  body "- ${v}" > "$D/body-$k"
+  run "$D" 1 "$k"
+  want "抽不出 SHA：${v} ⇒ UNKNOWN、rc=2" "$([ "$RC" = 2 ] && has "UNKNOWN ${H}${k} - " && has "${v}" && endline; echo $?)"
+  k=$((k+1))
+done
 
 # 單票：讀不到、沒錨點段、錨點段沒連結 ⇒ 都不回 0
 D="$T/single"; mkdir -p "$D"; : > "$D/fail-body-1"

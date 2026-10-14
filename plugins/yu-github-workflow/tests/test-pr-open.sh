@@ -56,6 +56,10 @@ printf '## 摘要\n修好 GH-%s 的問題\n' 5 > "${T}/gh-n"
 printf '## 摘要\n修好 gh-%s 的問題\n' 5 > "${T}/gh-n-lower"
 printf '## 摘要\nCloses %s%s\n' '＃' 5 > "${T}/fullwidth"
 printf '## 摘要\n見 https://github.com/some-owner/some-repo/blob/main/README.md 與 GHz-5 規格\n' > "${T}/url-blob"
+printf '## 摘要\n見 https://GitHub.com/some-owner/some-repo/issues/%s\n' 5 > "${T}/url-upper"
+printf '## 摘要\n見 https://WWW.GITHUB.COM/some-owner/some-repo/pull/%s\n' 5 > "${T}/url-www-upper"
+printf '## 摘要\nCloses %s%s%s\n' '#' '#' 5 > "${T}/double-hash"
+printf '## 摘要\n見 &%s%s; 的寫法與 &%s%s%s;\n' '#' 39 '#' '#' 39 > "${T}/html-entity"
 
 PASS=0 FAILN=0
 calls() { grep -c "^$1" "${FAKE_LOG}"; } # 某種 gh 呼叫的次數
@@ -115,13 +119,15 @@ run fail ok '' "${T}/bare"
 c_vis_fail() { [ "${rc}" -eq 1 ] && [ "$(calls 'pr create')" -eq 0 ] && [ "$(calls 'repo view')" -eq 1 ]; }
 verdict '讀不到可見度：照公開掃描、沒呼叫 gh pr create' c_vis_fail
 
-for fx in url-issue url-pull gh-n gh-n-lower fullwidth; do
+for fx in url-issue url-pull gh-n gh-n-lower fullwidth url-upper url-www-upper double-hash; do
   run PUBLIC ok '' "${T}/${fx}"
   verdict "沒有私有擴充：內建檢查擋 ${fx}、沒呼叫 gh pr create" c_builtin
 done
 
 run PUBLIC ok '' "${T}/url-blob"
 verdict '⬛ 對照：一般檔案連結與 GHz-5 不擋、照常開' c_clean
+run PUBLIC ok '' "${T}/html-entity"
+verdict '⬛ 對照：HTML 字元參照（&＋井號＋數字）不擋、照常開' c_clean
 
 # 有私有擴充：內建檢查照跑，私有 pr-scan.sh 只加不取代
 run PUBLIC ok "${T}/priv-pass" "${T}/bare"
