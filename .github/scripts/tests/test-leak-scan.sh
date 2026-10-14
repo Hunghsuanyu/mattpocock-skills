@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for .github/scripts/leak-scan.sh and the push branch of .github/workflows/leak-scan.yml.
 # Everything runs on throwaway git repos built here, with harmless made-up patterns
-# (ZZCANARYZZ, Acme{Corp, OwnerQQ). No network, no gh, no secrets.
+# (ZZCANARYZZ, Acme{Corp, OwnerQQ, nerQ). No network, no gh, no secrets.
 #
 # Every failing case is paired with a known-hit control, so "0 hits" is never read as clean
 # by a scan that simply saw nothing.
@@ -25,7 +25,14 @@ trap 'command rm -rf "$T"' EXIT
 MUTATIONS='warn-handler	s/^\$SIG\{__WARN__\} = .*$//	scan
 binary-hit	s/\(\?:Binary files \|GIT binary patch\)/(?:QQNEVERQQ)/	scan
 author-name	s/"\$p" "\$an"/"$p" ""/	scan
-owner-skip-names	s/if \$owner ne ''/if $pos !~ \/-name:\/ \&\& $owner ne ''/	scan
+owner-skip-names	s/\$noreply, \$owner\)/$pos =~ \/-name:\/ ? () : ($noreply, $owner))/	scan
+owner-strip-first	s/^  my @own; /  $t =~ s\/\\Q$owner\\E\/\/g if length $owner; my @own; /	scan
+owner-span-start-only	s/\$e <= \$_->\[1\]/$s < $_->[1]/	scan
+owner-no-span-skip	s/return 1 if \$s >= /return 0 if $s >= /	scan
+owner-drop-whole-record	s/if \(inside\(\\@own, \$-\[0\], \$\+\[0\]\)\)/if (@own)/	scan
+noreply-span-dropped	s/\$noreply, \$owner\)/$owner)/	scan
+checkout-unpinned	s/actions\/checkout@[0-9a-f]{40}/actions\/checkout@v4/	wf
+delete-shares-group	s/^  group: .*$/  group: leak-scan-${{ github.ref }}/	wf
 push-before	s/head="\$AFTER"; base=""/head="$AFTER"; base="$BEFORE"/	wf'
 
 if [ "${1:-}" = --mutations ]; then
@@ -148,8 +155,33 @@ check 'control: non-owner text in the same commit still hits' '[ "$RC" -eq 1 ] &
 check 'owner in author/committer name does not hit' 'lacks "author-name" && lacks "committer-name"'
 check 'owner in message and own noreply email do not hit' 'lacks "pattern=1" && lacks "author-email" && lacks "committer-email"'
 
+# ---------- 5b. owner spans: only a hit lying wholly inside an owner occurrence is dropped ----------
+ON=(env LEAK_OWNER=OwnerQQ LEAK_NOREPLY='1+OwnerQQ@users.noreply.github.com')
+run "${ON[@]}" LEAK_PATTERNS='OwnerQQ/x-repo' bash "$SCAN" text t <<< 'see OwnerQQ/x-repo now'
+check 'pattern longer than owner (owner/x-repo) hits' '[ "$RC" -eq 1 ] && has "pattern=1"'
+run "${ON[@]}" LEAK_PATTERNS='nerQ' bash "$SCAN" text t <<< 'hello OwnerQQ'
+check 'pattern inside owner, only in owner => no hit' '[ "$RC" -eq 0 ]'
+run env LEAK_PATTERNS='nerQ' bash "$SCAN" text t <<< 'hello OwnerQQ'
+check 'control: same pattern and text without LEAK_OWNER hits' '[ "$RC" -eq 1 ] && has "pattern=1"'
+run "${ON[@]}" LEAK_PATTERNS='nerQ' bash "$SCAN" text t <<< 'OwnerQQ and nerQ'
+check 'pattern inside owner, also standalone elsewhere => hit once' '[ "$RC" -eq 1 ] && [ "$(grep -c "^HIT " "$OUT")" -eq 1 ]'
+run "${ON[@]}" LEAK_PATTERNS='noreply' bash "$SCAN" text t <<< 'by 1+OwnerQQ@users.noreply.github.com'
+check 'pattern inside own noreply address => no hit' '[ "$RC" -eq 0 ]'
+run "${ON[@]}" LEAK_PATTERNS='[+]OwnerQQ@' bash "$SCAN" text t <<< 'by 1+OwnerQQ@users.noreply.github.com'
+check 'pattern spanning owner plus noreply text, inside noreply => no hit' '[ "$RC" -eq 0 ]'
+run env LEAK_OWNER=OwnerQQ LEAK_PATTERNS='[+]OwnerQQ@' bash "$SCAN" text t <<< 'by 1+OwnerQQ@users.noreply.github.com'
+check 'control: same without LEAK_NOREPLY hits (owner span alone is shorter)' '[ "$RC" -eq 1 ] && has "pattern=1"'
+run "${ON[@]}" LEAK_PATTERNS='ownerqq' bash "$SCAN" text t <<< 'see ownerqq'
+check 'owner span is case-sensitive: other-case text still hits' '[ "$RC" -eq 1 ]'
+run "${ON[@]}" LEAK_PATTERNS="$(printf 'ZZCANARYZZ\nnerQ')" bash "$SCAN" commits "$R" "$U" "$OW"
+check 'commits: owner-substring pattern in author/committer name does not hit' '[ "$RC" -eq 1 ] && has "pattern=1" && lacks "pattern=2"'
+
+# ---------- 5c. workflow pins and concurrency ----------
+check 'workflows pin actions/checkout to a full SHA' '! grep -hE "uses: *actions/checkout@" "$WF" "$ROOT/.github/workflows/plugin-tests.yml" | grep -vqE "@[0-9a-f]{40}( |$)"'
+check 'branch-delete push runs get their own concurrency group' 'grep -E "^  group:" "$WF" | grep -qF "github.event.deleted" && grep -E "^  group:" "$WF" | grep -qF "github.run_id"'
+
 # ---------- 6. no output anywhere carried a test string ----------
-if grep -lE 'ZZCANARYZZ|Acme|OwnerQQ' "$T"/out.* > "$T/leaky"; then
+if grep -lE 'ZZCANARYZZ|Acme|OwnerQQ|ownerqq|nerQ|x-repo' "$T"/out.* > "$T/leaky"; then
   bad "no output contains a pattern string ($(wc -l < "$T/leaky" | tr -d ' ') files)"
 else
   ok 'no output contains a pattern string'

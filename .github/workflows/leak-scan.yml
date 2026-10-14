@@ -13,9 +13,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: leak-scan-${{ github.ref }}
-  # Every run rescans everything its head adds over upstream main (the whole PR, or the whole
-  # pushed branch), so a newer run covers a queued run that concurrency replaced.
+  # A branch-delete push scans nothing (the job is skipped), so it gets a group of its own:
+  # sharing the branch's group would let it replace a queued run that had not scanned yet.
+  group: ${{ github.event_name == 'push' && github.event.deleted && format('leak-scan-delete-{0}', github.run_id) || format('leak-scan-{0}', github.ref) }}
+  # Every other run rescans everything its head adds over upstream main (the whole PR, or the
+  # whole pushed branch), so a newer run covers a queued run that concurrency replaced.
   # In-progress push runs are still left to finish.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -29,7 +31,7 @@ jobs:
       LEAK_OWNER: ${{ github.repository_owner }}
       LEAK_NOREPLY: ${{ github.repository_owner_id }}+${{ github.repository_owner }}@users.noreply.github.com
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4 at pin time)
         with:
           fetch-depth: 0
           persist-credentials: false
