@@ -5,6 +5,8 @@
 #   ③ 查詢失敗 rc=2，而且什麼都沒寫
 #   ④ 冪等：套用完的狀態再跑 dry-run ⇒ 建立 0、改名 0、刪除 0、更新 0
 #   ⑤ 等待擁有者的標籤永不刪；狀態標籤只在 project 記法、沒有開著的票在用時刪
+#   ⑥ 等待擁有者／機器標籤與會建、改名、刪的標籤撞名 ⇒ rc=64、一個 gh 呼叫都沒有
+#   ⑦ 寫完讀回：寫入被靜默吃掉 ⇒ 不印「已」、rc=1
 set -uo pipefail
 TLS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)" || exit 9
 PLUGIN="$(cd "${TLS_DIR}/.." && pwd -P)" || exit 9
@@ -15,7 +17,9 @@ for f in "${S}" "${MD}"; do [ -f "${f}" ] || { echo "FAIL 檔案不存在：${f}
 T="$(mktemp -d)" || exit 9
 trap 'rm -rf "${T}"' EXIT
 mkdir -p "${T}/bin"
-# 假 gh：記下每一次呼叫；label list 回 FAKE_LABELS 檔；api 依 FAKE_COUNTS（標籤<TAB>狀態<TAB>張數）印出那麼多個票號。
+# 假 gh：記下每一次呼叫；label list 回 FAKE_LABELS 檔（寫入會改這個檔，所以讀回看得到寫入的結果）；
+#   FAKE_DROP=1 ⇒ 寫入照記帳、回 0，但不改 FAKE_LABELS（模擬寫入被靜默吃掉）。
+#   api 依 FAKE_COUNTS（標籤<TAB>狀態<TAB>張數）印出那麼多個票號；帶 -X／--method 的 api 呼叫算寫入，記進帳本。
 cat > "${T}/bin/gh" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${FAKE_LOG}"
@@ -25,12 +29,19 @@ case "$1 $2" in
     cat "${FAKE_LABELS}" ;;
   "label create"|"label edit"|"label delete")
     printf '%s\n' "$*" >> "${FAKE_WRITES}"
-    if [ "$2" = create ]; then # 另記一份「名稱<TAB>顏色<TAB>說明」，說明裡有空白也不會切錯
-      n="$3" c="" d=""; shift 3
-      while [ $# -gt 0 ]; do case "$1" in --color) c="$2"; shift ;; --description) d="$2"; shift ;; esac; shift; done
+    op="$2" n="$3" c="" d="" nn=""; shift 3
+    while [ $# -gt 0 ]; do case "$1" in --color) c="$2"; shift ;; --description) d="$2"; shift ;; --name) nn="$2"; shift ;; esac; shift; done
+    if [ "${op}" = create ]; then # 另記一份「名稱<TAB>顏色<TAB>說明」，說明裡有空白也不會切錯
       printf '%s\t%s\t%s\n' "${n}" "${c}" "${d}" >> "${FAKE_WRITES}.created"
-    fi ;;
+    fi
+    [ "${FAKE_DROP:-}" = 1 ] && exit 0
+    case "${op}" in
+      create) jq --arg n "${n}" --arg c "${c}" --arg d "${d}" 'map(select(.name != $n)) + [{name: $n, color: $c, description: $d}]' ;;
+      edit) jq --arg o "${n}" --arg n "${nn}" --arg c "${c}" --arg d "${d}" 'map(if .name == $o then {name: $n, color: $c, description: $d} else . end)' ;;
+      delete) jq --arg n "${n}" 'map(select(.name != $n))' ;;
+    esac < "${FAKE_LABELS}" > "${FAKE_LABELS}.new" && mv "${FAKE_LABELS}.new" "${FAKE_LABELS}" ;;
   api*)
+    case " $* " in *" -X "*|*" --method "*) printf '%s\n' "$*" >> "${FAKE_WRITES}"; exit 0 ;; esac
     [ "${FAKE_FAIL:-}" = api ] && { echo "HTTP 502" >&2; exit 1; }
     url="$2"
     st=$(printf '%s' "${url}" | sed -n 's/.*[?&]state=\([^&]*\).*/\1/p')
@@ -48,12 +59,13 @@ PASS=0 FAILN=0
 ok(){ echo "ok   $1"; PASS=$((PASS + 1)); }
 ng(){ echo "FAIL $1"; FAILN=$((FAILN + 1)); }
 check(){ if [ "$2" = "$3" ]; then ok "$1"; else ng "$1（預期 [$3]，實際 [$2]）"; fi; }
-reset(){ : > "${FAKE_LOG}"; : > "${FAKE_WRITES}"; : > "${FAKE_WRITES}.created"; : > "${FAKE_COUNTS}"; unset FAKE_FAIL; printf '%s' "${1:-[]}" > "${FAKE_LABELS}"; }
+reset(){ : > "${FAKE_LOG}"; : > "${FAKE_WRITES}"; : > "${FAKE_WRITES}.created"; : > "${FAKE_COUNTS}"; unset FAKE_FAIL FAKE_DROP; printf '%s' "${1:-[]}" > "${FAKE_LABELS}"; }
 writes(){ grep -c . "${FAKE_WRITES}"; }
 M="--machine-labels 機器甲,機器乙 --owner-wait-label 等主人"
 
 reset '[]'
-check "腳本拿到的是假 gh" "$(command -v gh)" "${T}/bin/gh"
+if [ "$(command -v gh)" = "${T}/bin/gh" ]; then ok "腳本拿到的是假 gh"
+else ng "腳本拿到的是假 gh（$(command -v gh)）"; echo "停：不是假 gh 就不跑"; exit 1; fi
 
 # ── ① 兩份相等 ──
 md_set(){ # $1＝labels|project；印「名稱 顏色」
@@ -129,6 +141,42 @@ reset "$(cat "${T}/applied.json")"
 bash "${S}" fake/repo --dry-run --status labels ${M} > "${T}/out" 2>&1
 check "④ 套用後再跑 dry-run" "$(grep '^會：' "${T}/out")" "會：建立 0、改名 0、刪除 0、更新 0"
 check "④ 夾具不是空的" "$([ "$(jq length "${T}/applied.json")" -ge 15 ] && echo y)" y
+
+# ── ⑥ 撞名 ⇒ rc=64、零呼叫（連讀都不讀）──
+collide(){ # 名稱 參數…
+  local name="$1"; shift
+  reset "${FIX}"; fill_counts
+  bash "${S}" fake/repo "$@" > "${T}/out" 2>&1; rc=$?
+  check "⑥ ${name}：rc=64、零 gh 呼叫" "${rc} $(grep -c . "${FAKE_LOG}")" "64 0"
+}
+collide '等待擁有者＝固定標籤' --owner-wait-label 錯誤
+collide '等待擁有者＝會改名的英文標籤' --owner-wait-label bug
+collide '等待擁有者＝會刪的預設標籤' --owner-wait-label duplicate
+collide '等待擁有者＝project 記法會刪的狀態標籤' --status project --owner-wait-label 施工中
+collide '等待擁有者＝labels 記法的狀態標籤' --status labels --owner-wait-label 待驗證
+collide '機器標籤＝固定標籤' --machine-labels 中驗證,機器乙
+collide '機器標籤＝會刪的預設標籤' --machine-labels 機器甲,wontfix
+collide '機器標籤＝等待擁有者' --machine-labels 機器甲,等主人 --owner-wait-label 等主人
+collide '兩個機器標籤同名' --machine-labels 機器甲,機器甲
+collide '大小寫不同也算撞名' --owner-wait-label Duplicate
+reset "${FIX}"; fill_counts
+# shellcheck disable=SC2086
+bash "${S}" fake/repo --dry-run ${M} > "${T}/out" 2>&1; rc=$?
+check "⑥ ⬛ 對照：不撞名 ⇒ rc=0" "${rc}" 0
+
+# ── ⑦ 寫完讀回 ──
+reset "${FIX}"; fill_counts; export FAKE_DROP=1
+# shellcheck disable=SC2086
+bash "${S}" fake/repo --status labels ${M} > "${T}/out" 2>&1; rc=$?
+check "⑦ 寫入被吃掉：rc=1" "${rc}" 1
+check "⑦ 寫入被吃掉：不印「已」" "$(grep -c '^已：' "${T}/out")" 0
+check "⑦ 寫入被吃掉：有寫過（不是空跑）" "$([ "$(writes)" -gt 0 ] && echo y)" y
+unset FAKE_DROP
+reset "${FIX}"; fill_counts
+# shellcheck disable=SC2086
+bash "${S}" fake/repo --status project ${M} > "${T}/out" 2>&1; rc=$?
+check "⑦ ⬛ 對照：寫入有生效 ⇒ rc=0、印「已」" "${rc} $(grep -c '^已：' "${T}/out")" "0 1"
+check "⑦ 寫完有再讀一次清單" "$(grep -c '^label list' "${FAKE_LOG}")" 2
 
 echo "通過 ${PASS}、失敗 ${FAILN}"
 [ "${FAILN}" = 0 ]

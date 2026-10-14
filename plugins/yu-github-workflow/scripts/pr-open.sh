@@ -4,9 +4,11 @@
 # 開 PR 一律經這支：公開 repo 開之前掃一次標題＋內文，開完讀回再掃一次；沒過就不開。
 #   ① 可見度：`gh repo view` 回 PRIVATE → 不掃，直接開。讀不到或回其他值 → 一律當公開。
 #   ② 掃描器（不另設變數）：
-#      - 有私有擴充（GITHUB_WORKFLOW_PRIVATE_DIR 非空）→ 跑該目錄裡的 pr-scan.sh，
-#        標準輸入餵「標題＋換行＋內文」，退出碼非 0＝沒過。有私有擴充卻沒有 pr-scan.sh → 不開。
-#      - 沒有私有擴充 → 內建檢查：擋三種票號寫法（owner/repo、短名、裸的「井號＋數字」；公開 repo 的 PR 不寫票號，不需要私有清單）。
+#      - 內建檢查一律跑：擋票號的各種寫法（owner/repo、短名、裸的「井號＋數字」、全形井號＋數字、
+#        `GH-<數字>`、`github.com/<owner>/<repo>/(issues|pull)/<數字>` 網址；公開 repo 的 PR 不寫票號，不需要私有清單）。
+#      - 有私有擴充（GITHUB_WORKFLOW_PRIVATE_DIR 非空）→ 內建檢查過了之後，再跑該目錄裡的 pr-scan.sh：
+#        標準輸入餵「標題＋換行＋內文」，退出碼非 0＝沒過。私有掃描只加不取代內建檢查。
+#        有私有擴充卻沒有 pr-scan.sh → 不開。
 #   ③ 開前沒過 → 不呼叫 gh pr create。開完讀回失敗、或讀回的內容沒過 → 印 PR 網址交擁有者處理。
 #
 # 退出碼：0 開好了（印 PR 網址）；1 沒開，或開了但讀回沒過；64 參數錯。
@@ -23,30 +25,33 @@ TITLE="$(cat "${TITLE_F}")"
 T="$(mktemp -d)" || exit 9
 trap 'rm -rf "${T}"' EXIT
 
-# 內建檢查：三種票號寫法都擋（fail-closed：公開上游的 owner/repo＋井號＋數字也會被擋，接受）。
+# 內建檢查：票號寫法都擋（fail-closed：公開上游的 owner/repo＋井號＋數字也會被擋，接受）。
 #   owner/repo＋井號＋數字；短名＋井號＋數字（前面不是英數、底線、斜線）；
-#   裸的井號＋數字（前面不是英數、底線、斜線、井號、&）。三種的後面都不是英數、底線。
+#   裸的井號＋數字（前面不是英數、底線、斜線、井號、&）；全形井號（＃）＋數字；
+#   GH-數字（不分大小寫，前面不是英數、底線）；github.com/<owner>/<repo>/(issues|pull)/數字。
+#   以上的後面都不是英數、底線。
 # 乾淨 → 0；命中 → 1；grep 自己失敗 → 也是 1（量不到不算乾淨）。
 pro_builtin_scan() {
   LC_ALL=C grep -nE \
     -e '[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]+([^A-Za-z0-9_]|$)' \
     -e '(^|[^A-Za-z0-9_/])[A-Za-z][A-Za-z0-9_-]*#[0-9]+([^A-Za-z0-9_]|$)' \
-    -e '(^|[^A-Za-z0-9_/#&])#[0-9]+([^A-Za-z0-9_]|$)' "$1" >&2
+    -e '(^|[^A-Za-z0-9_/#&])#[0-9]+([^A-Za-z0-9_]|$)' \
+    -e '＃[0-9]+([^A-Za-z0-9_]|$)' \
+    -e '(^|[^A-Za-z0-9_])[Gg][Hh]-[0-9]+([^A-Za-z0-9_]|$)' \
+    -e 'github\.com/[^/[:space:]]+/[^/[:space:]]+/(issues|pull)/[0-9]+([^A-Za-z0-9_]|$)' "$1" >&2
   [ $? -eq 1 ]
 }
 
-# 參數：要掃的檔。沒過 → 非 0（原因印在 stderr）。
+# 參數：要掃的檔。沒過 → 非 0（原因印在 stderr）。內建檢查一律先跑；有私有擴充再加跑 pr-scan.sh。
 pro_scan() {
   local dir="${GITHUB_WORKFLOW_PRIVATE_DIR:-}"
-  if [ -n "${dir}" ]; then
-    if [ ! -f "${dir}/pr-scan.sh" ]; then
-      echo "pr-open: 有私有擴充（${dir}）卻讀不到 pr-scan.sh，不掃就不開" >&2
-      return 1
-    fi
-    bash "${dir}/pr-scan.sh" < "$1" >&2 || { echo "pr-open: 私有擴充的 pr-scan.sh 沒過" >&2; return 1; }
-  else
-    pro_builtin_scan "$1" || { echo "pr-open: 內建檢查擋下票號（公開 repo 的 PR 不寫票號）" >&2; return 1; }
+  pro_builtin_scan "$1" || { echo "pr-open: 內建檢查擋下票號（公開 repo 的 PR 不寫票號）" >&2; return 1; }
+  [ -n "${dir}" ] || return 0
+  if [ ! -f "${dir}/pr-scan.sh" ]; then
+    echo "pr-open: 有私有擴充（${dir}）卻讀不到 pr-scan.sh，不掃就不開" >&2
+    return 1
   fi
+  bash "${dir}/pr-scan.sh" < "$1" >&2 || { echo "pr-open: 私有擴充的 pr-scan.sh 沒過" >&2; return 1; }
 }
 
 # ── ① 可見度 ──
