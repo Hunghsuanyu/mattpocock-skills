@@ -25,7 +25,7 @@ trap 'command rm -rf "$T"' EXIT
 MUTATIONS='warn-handler	s/^\$SIG\{__WARN__\} = .*$//	scan
 binary-hit	s/\(\?:Binary files \|GIT binary patch\)/(?:QQNEVERQQ)/	scan
 author-name	s/"\$p" "\$an"/"$p" ""/	scan
-owner-strip-all	s/if \$is_email \&\& \$owner ne/if $owner ne/	scan
+owner-skip-names	s/if \$owner ne ''/if $pos !~ \/-name:\/ \&\& $owner ne ''/	scan
 push-before	s/head="\$AFTER"; base=""/head="$AFTER"; base="$BEFORE"/	wf'
 
 if [ "${1:-}" = --mutations ]; then
@@ -135,16 +135,18 @@ chmod +x "$T/shim/git"
 run env PATH="$T/shim:$PATH" LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$BN"
 check 'still-binary diff => HIT pattern=binary' '[ "$RC" -eq 1 ] && has "pattern=binary"'
 
-# ---------- 5. LEAK_OWNER is removed from email fields only ----------
+# ---------- 5. LEAK_OWNER is removed from every field, names included ----------
 g checkout -q -b owner "$U"
-echo o > "$R/o.txt"; g add o.txt
+echo 'o ZZCANARYZZ' > "$R/o.txt"; g add o.txt
+GIT_AUTHOR_NAME='OwnerQQ' GIT_COMMITTER_NAME='OwnerQQ' \
 GIT_AUTHOR_EMAIL='1+OwnerQQ@users.noreply.github.com' GIT_COMMITTER_EMAIL='1+OwnerQQ@users.noreply.github.com' \
   g commit -qm 'see the OwnerQQ page'
 OW=$(g rev-parse HEAD)
-run env LEAK_PATTERNS=OwnerQQ LEAK_OWNER=OwnerQQ LEAK_NOREPLY='1+OwnerQQ@users.noreply.github.com' \
-  bash "$SCAN" commits "$R" "$U" "$OW"
-check 'owner in message still hits' '[ "$RC" -eq 1 ] && has "at=msg:1 pattern=1"'
-check 'owner in own noreply email does not hit' 'lacks "author-email" && lacks "committer-email" && lacks OwnerQQ'
+run env LEAK_PATTERNS="$(printf 'OwnerQQ\nZZCANARYZZ')" LEAK_OWNER=OwnerQQ \
+  LEAK_NOREPLY='1+OwnerQQ@users.noreply.github.com' bash "$SCAN" commits "$R" "$U" "$OW"
+check 'control: non-owner text in the same commit still hits' '[ "$RC" -eq 1 ] && has "at=diff:file1:line1 pattern=2"'
+check 'owner in author/committer name does not hit' 'lacks "author-name" && lacks "committer-name"'
+check 'owner in message and own noreply email do not hit' 'lacks "pattern=1" && lacks "author-email" && lacks "committer-email"'
 
 # ---------- 6. no output anywhere carried a test string ----------
 if grep -lE 'ZZCANARYZZ|Acme|OwnerQQ' "$T"/out.* > "$T/leaky"; then

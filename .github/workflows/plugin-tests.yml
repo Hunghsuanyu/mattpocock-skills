@@ -45,4 +45,5 @@ jobs:
           exit "$rc"
 
       - name: Run the leak-scan tests
+        if: always()
         run: bash .github/scripts/tests/test-leak-scan.sh

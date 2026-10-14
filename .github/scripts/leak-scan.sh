@@ -14,6 +14,8 @@
 #
 # Not scanned (outside this script's domain): tags and tag messages, branch names, PR and
 # review comments, issue text, release notes. Only commits and what is piped into "text".
+# A commit removed by a force-push before any run scanned it is never scanned, yet stays
+# readable on GitHub by its SHA.
 #
 # Output never contains the matched text or the file path, only where it was:
 #   HIT commit=<n> sha=<sha12> at=<kind>:<pos> pattern=<k>     (k = line number in LEAK_PATTERNS)
@@ -22,8 +24,10 @@
 # both exit 2.
 # Exit: 0 clean, 1 hit, 2 bad usage / git failure / patterns missing or warning (never read as clean).
 #
-# Optional env: LEAK_NOREPLY (the fork owner's noreply address) is removed from every record
-# before scanning; LEAK_OWNER (the owner's account name) only from the author/committer email.
+# Optional env: LEAK_NOREPLY (the fork owner's noreply address) and LEAK_OWNER (the owner's
+# account name) are removed from every record before scanning (lines, paths, message, names,
+# emails). So a pattern that is a substring of the owner name does not hit where the owner
+# name appears (it is removed first); to catch such text a pattern must include more than it.
 set -uo pipefail
 
 SCANNER=''
@@ -96,7 +100,7 @@ while (my $l = <STDIN>) {
   my $is_email = $pos =~ /:(?:author|committer)-email:/;
   if ($is_email && $t !~ $NR) { out($pos, 'non-noreply-email'); }
   $t =~ s/\Q$noreply\E//g if $noreply ne '';
-  $t =~ s/\Q$owner\E//g   if $is_email && $owner ne '';
+  $t =~ s/\Q$owner\E//g   if $owner ne '';
   for my $pp (@pat) { my ($i, $re) = @$pp; while ($t =~ /$re/g) { out($pos, $i); } }
   while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR; }
 }
