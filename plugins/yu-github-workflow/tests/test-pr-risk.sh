@@ -74,7 +74,8 @@ nodoor() { grep -cE '門|影響範圍|單向|雙向' "${T}/out"; }          # �
 # ── 單張 ──
 rc=$(run fake/repo 1)
 check "輕：rc=0" "${rc}" 0
-check "輕：表頭" "$(cnt "${T}/out" '| 票 | 驗證標籤 | 外審結論 | 合併後步驟 |')" 1
+check "輕：第一行就是表頭（不印「合併風險」標題，那段由開 PR 的人寫）" "$(head -1 "${T}/out")" '| 票 | 驗證標籤 | 外審結論 | 合併後步驟 |'
+check "輕：沒有合併風險標題" "$(grep -c '合併風險' "${T}/out")" 0
 check "輕：那一列" "$(cnt "${T}/out" "$(row 1 輕驗證 不需要 無)")" 1
 check "輕：不判門" "$(nodoor)" 0
 check "輕：沒有未定" "$(grep -c '未定' "${T}/out")" 0
