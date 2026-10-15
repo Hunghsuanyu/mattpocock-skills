@@ -1,6 +1,6 @@
 ---
 name: pr
-description: "開 PR、寫 PR 內文。內文是摘要（最小的圖）、證據（一句結論＋連結）、合併風險（Door 與 Blast Radius 由開 PR 的人看實際改動判斷，下面接 scripts/pr-risk.sh 列出的逐票事實與連票）；開 PR 一律經 scripts/pr-open.sh（公開 repo 開前開後各掃一次）。Use only when the GitHub workflow entry skill routes here, or when the user runs /pr."
+description: "開 PR、寫 PR 內文。內文是摘要（最小的圖）、證據（一句結論＋連結）、合併風險（Door 與 Blast Radius 由開 PR 的人看實際改動判斷）與連票（Closes／Refs 由開 PR 的人照票判斷）；公開 repo 開 PR 前，標題與內文先遮掉內部名稱與票號。Use only when the GitHub workflow entry skill routes here, or when the user runs /pr."
 metadata:
   credits:
     skill: show-me
@@ -31,7 +31,7 @@ metadata:
 - 合併只有擁有者按。**公開 repo 的 PR 按合併時，把 GitHub 預設的 merge commit 標題改成不含分支名的句子**：預設標題帶來源分支名，合併後就留在公開歷史裡（分支命名規則見 [SPEC 範本](${CLAUDE_PLUGIN_ROOT}/skills/to-spec/references/spec-template.md) 第 2 段）。
 - 開之前讀 repo 設定 `docs/agents/github.md` 的「特殊禁忌」：不是 `無` → 讀它底下的「特殊禁忌」段，這個 PR 碰到的照著做。
 
-## 3. 內文：三段自己寫，逐票事實與連票貼 `pr-risk.sh` 的輸出
+## 3. 內文：每一段都自己寫
 
 不要前言，文字盡量少。私有 repo 的 PR 共四段：
 
@@ -52,10 +52,10 @@ metadata:
 
 <可選：合併後可能的連帶影響>
 
-<pr-risk.sh 的整份輸出：逐票事實 …… ## 連票 ……>
-```
+## 連票
 
-`## 合併風險` 標題、Door、Blast Radius 由你寫；`pr-risk.sh` 的輸出原樣接在後面（它不印這個標題）。
+<每張票一行：Closes 或 Refs（第 4 節）>
+```
 
 公開 repo 的 PR 共三段：摘要、證據、`## 合併風險`（只留 Door 與 Blast Radius，見下面「合併風險」）。
 
@@ -88,37 +88,29 @@ metadata:
 - **有票掛 `重驗證-自檢` 卻判 two-way**：理由要寫明為什麼退得回來（例：這次只改讀取端、正式資料沒動），不能只寫「two-way」。
 - **Blast Radius**：一個詞，寫這次改動可能波及的範圍；把可能性都想過（例：版面、下游呼叫端、行動版、部署線）。需要時下面再加一兩句合併後可能的連帶影響。
 
-**逐票事實跑腳本帶出**：
+**逐票看過再寫**：每張票的驗證標籤（判準是 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 第一節③）；`重驗證-外審` 的票上有沒有總驗收留下的通過結論（`review` 第 3.6 節）——沒有就先補齊，不開 PR。
 
-```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/pr-risk.sh" <owner/repo> <整合分支裡全部的票號…>
-```
-
-- 它讀每張票的驗證標籤、內文與留言（只讀），不判門，只列事實：每張票的驗證標籤、`重驗證-外審` 的外審結論（有／無／不通過，附留言連結）、有沒有合併後的步驟，以及「連票」段。驗證標籤的判準是 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 第一節③；外審結論是總驗收的 session 留在每張外審票上的那則（`review` 第 3.6 節）。
-- **退出碼 2＝有票讀不到**，什麼都沒印——**不可以當成沒有風險**，修好讀取再跑。
-- **退出碼 3＝有票不齊**：有票沒掛驗證標籤，或 `重驗證-外審` 的票外審結論缺席、不是通過 → **先補齊，不開 PR**。退出碼 0 才往下走。
-- **退出碼 64＝參數錯**。
-- **公開 repo 的 PR**：只寫 `## 合併風險` 標題與 Door、Blast Radius；`pr-risk.sh` 的輸出（逐票事實、外審結論連結、`## 連票` 段）含私有 repo 名與票號，不貼，改由指揮台貼在私有 SPEC 的留言。Door 的理由與 Blast Radius 一樣不寫私有 repo 名與票號。
+- **公開 repo 的 PR**：只寫 `## 合併風險` 標題與 Door、Blast Radius；逐票的事實與外審結論連結含私有 repo 名與票號，不寫進 PR，改由指揮台貼在私有 SPEC 的留言。Door 的理由與 Blast Radius 一樣不寫私有 repo 名與票號。
 
 ## 4. 連票：`Closes`／`Refs`
 
-- **私有 repo 的整合 PR**：內文列出全部票，就是第 3 節貼進去的 `pr-risk.sh` 輸出裡的 `## 連票` 段，不另寫一份。它照票上有沒有「合併後／部署後」的步驟決定：有 → `Refs`（合併時不關票，擁有者的步驟做完後由指揮台關）；沒有 → `Closes`。
+- **私有 repo 的整合 PR**：`## 連票` 段列出全部票，由你逐張讀票決定：票上有「合併後／部署後」的步驟 → `Refs`（合併時不關票，擁有者的步驟做完後由指揮台關）；沒有 → `Closes`。
 - **`Closes` 不可以包在反引號裡**：包了會變成程式碼片段，GitHub 不登記、合併時票安靜地不關。細節與驗法見 [closes-keyword.md](${CLAUDE_PLUGIN_ROOT}/skills/pr/references/closes-keyword.md)。
 - 跨 repo 寫 `Closes <owner>/<repo>#<票號>`。
 - **公開 repo 的 PR 不得提到私有 repo 名與票號**：不寫 `Closes`／`Refs`。合併後由指揮台逐張關票。
 
-## 5. 開 PR：一律經 `pr-open.sh`
+## 5. 開 PR
 
-先把標題與內文各寫成一個檔（`<<'EOF'` 有引號的 heredoc），然後：
+先把標題與內文各寫成一個檔（`<<'EOF'` 有引號的 heredoc）。
+
+- **公開 repo**：開之前把標題與內文讀一遍，**遮掉內部名稱與票號**——私有 repo 名、私有票號（各種寫法：`#數字`、`owner/repo#數字`、票的網址）、人名、本機路徑，連公開上游的票號也不寫。有私有擴充時，再把「標題＋換行＋內文」交給私有目錄的 `pr-scan.sh` 掃一次，沒過不開（介面見 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md)）。沒過就改內文，不改掃描器。設了私有擴充、目錄裡卻沒有 `pr-scan.sh` → 不開，告訴擁有者缺哪個檔（`<私有目錄>/pr-scan.sh`）。
+- 然後開：
 
 ```bash
-"${CLAUDE_PLUGIN_ROOT}/scripts/pr-open.sh" <owner/repo> <base> <head> <標題檔> <內文檔>
+gh pr create -R <owner>/<repo> --base <base> --head <head> --title "$(cat <標題檔>)" --body-file <內文檔>
 ```
 
-- 它先讀 repo 可見度：私有 → 不掃、直接開；**公開，或讀不到可見度** → 開之前掃一次標題＋內文，開完讀回再掃一次。
-- 掃描器：**內建檢查一律跑**，擋票號的各種寫法：`owner/repo`＋井號＋數字、短名＋井號＋數字、裸的「井號＋數字」、全形井號＋數字、`GH-<數字>`（不分大小寫）、`github.com/<owner>/<repo>/(issues|pull)/<數字>` 網址；公開上游的票號也會被擋，照樣不寫。有私有擴充時，內建檢查過了再跑那個目錄裡的 `pr-scan.sh`——**私有掃描只加不取代**，兩個都過才開（有私有擴充卻沒有這個檔 → 不開）。介面見 [私有擴充](${CLAUDE_PLUGIN_ROOT}/references/private-extension.md)。
-- 退出碼：`0` 開好了，印 PR 網址；`1` 沒開，或開了但讀回失敗、讀回沒過——印出的網址交擁有者處理；`64` 參數錯。
-- **不要直接跑 `gh pr create`**，也不要為了過掃描去改掃描器；沒過就改內文。
+- repo 有在 PR 開啟／編輯時掃標題與內文的 CI 時，那是補網：漏了是公開之後才報紅，PR 的編輯紀錄仍看得到原文，所以開之前那一遍不能省。
 
 ## 6. 開完回查
 

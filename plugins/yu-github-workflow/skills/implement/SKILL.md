@@ -31,7 +31,7 @@ description: "Implement exactly one issue-tracker ticket on a branch cut from it
 2. **說出要從哪條整合分支開**：名字以 SPEC 第 2 段「範圍」寫的為準（唯一來源），票上寫的是照抄。說明「會從整合分支 `<名>` 開分支，不從 main 開」。SPEC 沒寫，或票上寫的和 SPEC 不一樣 → 問，不要自己取名，也不要退回從預設分支開。
 3. **掛狀態與機器**：照 repo 設定（`docs/agents/github.md` 的「施工狀態記法」「機器標籤名」），標籤的意思以 [labels.md](${CLAUDE_PLUGIN_ROOT}/references/labels.md) 為準。同一份設定的「特殊禁忌」不是 `無` → 讀它底下的「特殊禁忌」段，整張票照著做。
    - 記法是狀態標籤：`gh issue edit <票號> -R <owner>/<repo> --add-label <施工中標籤> --add-label <這台的機器標籤>`。
-   - 記法是 Project Status：把票的 Status 改成 repo 設定「Status 選項 ID」裡施工中的那一個（`In Progress` 或 `施工中`），再掛機器標籤，不掛狀態標籤。開票自檢格 3 只認 `In Progress`、`施工中`、`待驗證` 這三個值當「有人在做」，選項名不是其中之一 → 停下告訴擁有者，不自己挑一個近似的。
+   - 記法是 Project Status：把票的 Status 改成 repo 設定「Status 選項 ID」裡施工中的那一個（`In Progress` 或 `施工中`），再掛機器標籤，不掛狀態標籤。使用端的每日稽核只認 `In Progress`、`施工中`、`待驗證` 這三個值當「有人在做」，選項名不是其中之一 → 停下告訴擁有者，不自己挑一個近似的。
    - 只改狀態與標籤，**不動票的內文**。
 4. **從整合分支開分支，一張票一個工作樹**：
    ```bash

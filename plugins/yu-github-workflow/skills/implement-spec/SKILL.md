@@ -64,7 +64,7 @@ disable-model-invocation: true
 1. 全部的**施工票**都合進整合分支後（`[外審]`、`[開票] 下一階段`、決策票不合進整合分支，不算在這個條件裡），交給 `review` 改動模式對**整條整合分支**的改動審一次（總驗收，交接照第 5 節）。`review` 設了 `disable-model-invocation`，而且驗收要由另一個 session 做：印出 `/yu-github-workflow:review` 與要審的整合分支，請擁有者在另一個對話打。
 2. 審查發現的問題**交一個子代理一次修完**，不拆票。
 3. 複驗一樣交給另一個 session，**只複驗修過的地方**，不整套重跑。
-4. **PR 收齊後才開一個**：整合分支 → main，交給 `pr` 那支開；不提早開草稿 PR（每次 push 都會跑 CI；同 repo 的 PR 會跑分支裡的 workflow、拿得到 secret）。驗證等級要求外審的，外審與各外審票上的通過結論在開 PR **之前**做完（沒有結論 `pr-risk.sh` 回 3，開不了）。
+4. **PR 收齊後才開一個**：整合分支 → main，交給 `pr` 那支開；不提早開草稿 PR（每次 push 都會跑 CI；同 repo 的 PR 會跑分支裡的 workflow、拿得到 secret）。驗證等級要求外審的，外審與各外審票上的通過結論在開 PR **之前**做完（沒有結論就不開，見 `pr` 第 3 節）。
 5. 進度看 SPEC 的子票清單與「已經做的決定」段，不另做進度表；收尾條件只看施工票。
 6. 收尾：清掉所有施工、合併子代理的工作樹（`git worktree remove --force <路徑>`），拆完看 `git worktree list`。
 

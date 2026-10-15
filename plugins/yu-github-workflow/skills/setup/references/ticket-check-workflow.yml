@@ -1,0 +1,76 @@
+name: ticket-check
+
+# 開票自檢的 Actions 範本：票開出時跑這個 plugin 的 scripts/ticket-check.sh，結果留言在票上。
+# 由 setup 裝進 repo（.github/workflows/ticket-check.yml），裝的時候把 <只檢查誰開的票> 換成
+# repo 設定「只檢查誰開的票」的帳號：外部帳號用範本開的票整張不查、不留言。
+#
+# 這是補網，不取代開票的人在本機跑的那一次：這裡的 token 只讀得到本 repo，
+# 錨點指向別的私有 repo 時那顆 SHA 問不到，列在「未驗」，不算 NG。
+# plugin 取公開 repo 的 main：與各機器 autoUpdate 同一條信任線。
+#
+# paths: 刻意不過濾——issues 觸發沒有檔案路徑可以過濾
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: ticket-check-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    if: github.event.issue.user.login == '<只檢查誰開的票>'
+    runs-on: ubuntu-latest
+    # 一張票的自檢只打幾次讀取 API；下限 5 分鐘（Actions 規範第 1 條）
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0 (tag v4 at pin time)
+        with:
+          repository: Hunghsuanyu/mattpocock-skills
+          ref: main
+          path: plugin-src
+          persist-credentials: false
+
+      - name: Run ticket-check.sh and comment on the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+        run: |
+          # 預設殼是 bash -e：自檢回 1、grep -c 數到 0 都會讓整步提早結束，先關掉，退出碼自己管
+          set +e -uo pipefail
+          out="$RUNNER_TEMP/out.txt"; body="$RUNNER_TEMP/body.md"
+          bash plugin-src/plugins/yu-github-workflow/scripts/ticket-check.sh "$GH_REPO" "$NUMBER" > "$out" 2>&1
+          rc=$?
+          cat "$out"
+          ng=$(grep -c '^NG ' "$out"); unk=$(grep -cE '^(\?\?|!!) ' "$out")
+          if grep -qx -- '--' "$out" && [ "$ng" = 0 ] && [ "$unk" = 0 ] && [ "$rc" = 0 ]; then
+            exit 0   # 全過：不留言
+          fi
+          {
+            echo "開票自檢：rc=$rc"
+            if ! grep -qx -- '--' "$out"; then
+              echo
+              echo "**沒跑完**（沒有印出總結），以下結果不算數。最後幾行："
+              echo '~~~~'; tail -n 20 "$out"; echo '~~~~'
+            fi
+            if [ "$ng" != 0 ]; then
+              echo; echo "### NG（照這幾行修好）"
+              echo '~~~~'; grep '^NG ' "$out"; echo '~~~~'
+            fi
+            if [ "$unk" != 0 ]; then
+              echo; echo "### 未驗（讀不到或沒被驗到，不是 NG；在本機用擁有者權限重跑）"
+              echo '~~~~'; grep -E '^(\?\?|!!) ' "$out"; echo '~~~~'
+            fi
+            if grep -qx -- '--' "$out"; then
+              echo; echo '~~~~'; sed -n '/^--$/,$p' "$out"; echo '~~~~'
+            fi
+          } > "$body"
+          gh issue comment "$NUMBER" --body-file "$body" || exit 1
+          grep -qx -- '--' "$out" || exit 1   # 沒跑完不算過
+          exit "$rc"
