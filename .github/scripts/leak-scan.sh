@@ -31,6 +31,8 @@
 # pattern equal to, or contained in, the owner name or noreply address does not hit there,
 # but still hits anywhere else; a pattern that reaches past the owner text (for example
 # owner/repo) hits. The same rule applies to the generic e-mail check.
+# The committer email of a GitHub web merge (exactly GitHub's noreply address) is not an e-mail hit;
+# that address in any other field (author, message, diff) still is.
 # Limit: when a hit lies inside an owner span the match is retried one character later, never
 # with a longer alternative from the same start. So a pattern that lists a shorter alternative
 # equal to the owner first (owner|owner/secret), or uses a lazy quantifier, can miss owner/secret.
@@ -110,7 +112,10 @@ while (my $l = <STDIN>) {
   my ($pos, $t) = split /\t/, $l, 2; $t //= '';
   if ($pos =~ /:binary\z/) { out($pos, 'binary'); next; }
   my $is_email = $pos =~ /:(?:author|committer)-email:/;
-  if ($is_email && $t !~ $NR) { out($pos, 'non-noreply-email'); }
+  # GitHub web merges are committed by GitHub's noreply address: only that field, only that value.
+  # Written with \@ so this line itself does not look like an e-mail address to a scan.
+  my $web_merge = $pos =~ /:committer-email:1\z/ && $t eq "noreply\@github.com";
+  if ($is_email && $t !~ $NR && !$web_merge) { out($pos, 'non-noreply-email'); }
   my @own;                             # [start, end) of every owner / own-noreply occurrence
   for my $s (grep { $_ ne '' } $noreply, $owner) {
     my $q = quotemeta $s; while ($t =~ /$q/g) { push @own, [$-[0], $+[0]]; } }
@@ -120,7 +125,7 @@ while (my $l = <STDIN>) {
       if ($-[0] == $+[0]) { print STDERR "leak-scan: pattern line $i matched an empty string\n"; exit 2; }
       if (inside(\@own, $-[0], $+[0])) { pos($t) = $-[0] + 1; next; }   # retry from the next char
       out($pos, $i); } }
-  while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR || inside(\@own, $-[0], $+[0]); }
+  while ($t =~ /$EMAIL/g) { out($pos, 'email') unless $& =~ $NR || $web_merge || inside(\@own, $-[0], $+[0]); }
 }
 print STDERR "leak-scan: $n records, $hits hits\n";
 fin($hits ? 1 : 0);
