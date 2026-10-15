@@ -8,7 +8,7 @@
     {
       "name": "yu-github-workflow",
       "source": "./plugins/yu-github-workflow",
-      "description": "GitHub issue workflow helpers: an entry skill that routes to the right workflow skill, and hooks around creating issues and pull requests (reminders before, self-checks after).",
+      "description": "GitHub issue workflow helpers: an entry skill that routes to the right workflow skill, the skills it routes to, and an issue self-check script (with an optional GitHub Actions workflow template that runs it when an issue is opened).",
       "category": "engineering"
     }
   ]
