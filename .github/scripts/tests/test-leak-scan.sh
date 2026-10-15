@@ -35,6 +35,8 @@ empty-load-check	s/^  if \(.. =~ \$re\).*$//	scan
 zero-length-guard	s/^      if \(\$-\[0\] == \$\+\[0\]\).*$//	scan
 checkout-unpinned	s/actions\/checkout@[0-9a-f]{40}/actions\/checkout@v4/	wf
 delete-shares-group	s/^  group: .*$/  group: leak-scan-${{ github.ref }}/	wf
+web-merge-no-allow	s/my \$web_merge = .*;$/my $web_merge = 0;/	scan
+web-merge-any-email	s/\/:committer-email:1\\z\//\/:(?:author|committer)-email:\//	scan
 push-before	s/head="\$AFTER"; base=""/head="$AFTER"; base="$BEFORE"/	wf'
 
 if [ "${1:-}" = --mutations ]; then
@@ -125,6 +127,32 @@ NM=$(g rev-parse HEAD)
 run env LEAK_PATTERNS=ZZCANARYZZ bash "$SCAN" commits "$R" "$U" "$NM"
 check 'author name scanned' '[ "$RC" -eq 1 ] && has "at=author-name:1 pattern=1"'
 check 'committer name scanned' 'has "at=committer-name:1 pattern=1" && lacks ZZCANARYZZ'
+
+# ---------- 3b. GitHub web merge: committer-email exactly GitHub's noreply address ----------
+# A merge made with the GitHub web button is committed by GitHub's noreply address. Only that
+# field with exactly that value is let through; the same address anywhere else still hits.
+gh_commit() { # <branch> <author-email> <committer-email> <message> <file line>
+  g checkout -q -b "$1" "$U"; echo "$5" > "$R/$1.txt"; g add "$1.txt"
+  GIT_AUTHOR_EMAIL="$2" GIT_COMMITTER_EMAIL="$3" g commit -qm "$4"; g rev-parse HEAD; }
+PL='plain@users.noreply.github.com'; GH=$(printf 'noreply%sgithub.com' @)   # built, so no literal address here
+WM=$(gh_commit webmerge "$PL" "$GH" 'merge' 'x')
+AE=$(gh_commit ghauthor "$GH" "$PL" 'author' 'x')
+XN=$(gh_commit xnoreply "$PL" "x-$GH" 'xn' 'x')
+EV=$(gh_commit ghevil "$PL" "$GH.evil" 'evil' 'x')
+MS=$(gh_commit ghmsg "$PL" "$PL" "by $GH" 'x')
+FL=$(gh_commit ghfile "$PL" "$PL" 'file' "by $GH")
+run env LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$WM"
+check 'web merge: committer-email = GitHub noreply does not hit' '[ "$RC" -eq 0 ] && lacks "HIT "'
+run env LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$AE"
+check 'control: author-email = GitHub noreply still hits both checks' '[ "$RC" -eq 1 ] && has "at=author-email:1 pattern=non-noreply-email" && has "at=author-email:1 pattern=email"'
+run env LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$XN"
+check 'committer-email x-<GitHub noreply> still hits' '[ "$RC" -eq 1 ] && has "at=committer-email:1 pattern=non-noreply-email"'
+run env LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$EV"
+check 'committer-email <GitHub noreply>.evil still hits' '[ "$RC" -eq 1 ] && has "at=committer-email:1 pattern=non-noreply-email"'
+run env LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$MS"
+check 'GitHub noreply in the commit message still hits' '[ "$RC" -eq 1 ] && has "at=msg:1 pattern=email"'
+run env LEAK_PATTERNS=QQNOMATCHQQ bash "$SCAN" commits "$R" "$U" "$FL"
+check 'GitHub noreply in file content still hits' '[ "$RC" -eq 1 ] && has "at=diff:file1:line1 pattern=email"'
 
 # ---------- 4. binary files ----------
 g checkout -q -b bin "$U"
