@@ -51,8 +51,8 @@ disable-model-invocation: true
   > 要不要裝開票自檢 workflow？（推薦：**裝**）
 
   一句說明：票開出時由 Actions 跑一次 `ticket-check.sh`、結果留言在票上，補上「開票的人忘了在本機跑」的那一次；代價是每開一張票吃一次 Actions 額度（每個 job 進位 1 分鐘），額度用完時它不跑、也不報紅。
-- 答案寫進設定的 `開票自檢 workflow` 欄位（`裝` 或 `不裝`）；答「裝」才裝（第 6 步）。
-- **已有設定檔的 repo 要改這個答案＝重跑 `setup`**，不另開別的路。
+- **repo 設定裡這一欄已經有答案（`裝` 或 `不裝`）→ 這一段整段跳過、不問**，沿用原答案。要改答案就重跑 `setup`、叫用時直接給新答案（叫用時給的答案優先於設定裡的舊答案），不另開別的路。
+- 答案寫進設定的 `開票自檢 workflow` 欄位（`裝` 或 `不裝`）；答「裝」才裝（第 6 步，裝之前還要過那一步的帳號檢查）。
 
 ## 3. 兩層設定：票開在哪個 repo
 
@@ -86,7 +86,11 @@ disable-model-invocation: true
 
 - 開「合併後自動刪分支」並**讀回確認**：指令見 [指令表](${CLAUDE_PLUGIN_ROOT}/skills/setup/references/gh-commands.md)「合併後自動刪分支」那列。讀回不是 `true` → 結果裡寫沒開成，不寫「已開」。
 - 讓外部審查工具或其他 GitHub App 讀得到這個 repo 等私有步驟：照私有擴充。
-- **開票自檢 workflow**（第 5 題答「裝」才做）：把 [範本](${CLAUDE_PLUGIN_ROOT}/skills/setup/references/ticket-check-workflow.yml) 複製成這個 repo 的 `.github/workflows/ticket-check.yml`，`<只檢查誰開的票>` 換成設定裡同名欄位的帳號，和 `docs/agents/github.md` 同一批提交。答「不裝」、repo 裡卻已經有這支 → 列給擁有者決定，不自己刪。限制寫在 [開票自檢](${CLAUDE_PLUGIN_ROOT}/references/ticket-check.md)「Actions 上跑」。
+- **開票自檢 workflow**（第 5 題答「裝」才做）：
+  1. 先看設定裡「只檢查誰開的票」的值。值是空的、`未設定`、或以 `見 ` 開頭 → **不裝**，結果裡寫「開票自檢 workflow 沒裝：只檢查誰開的票是 `<值>`」，請擁有者補上帳號後重跑 `setup`。這種值裝上去，`if:` 永遠不成立，workflow 每次都 skip、不留言、Actions 顯示成功，看起來像已裝而且全過。
+  2. 是帳號 → 先跑 `gh api users/<帳號> --jq .login` 讀回。讀不回（帳號不存在、沒問到）→ **不裝**，結果裡寫讀不回的帳號與錯誤訊息。
+  3. 讀回成功才把 [範本](${CLAUDE_PLUGIN_ROOT}/skills/setup/references/ticket-check-workflow.yml) 複製成這個 repo 的 `.github/workflows/ticket-check.yml`，`<只檢查誰開的票>` 換成那個帳號，和 `docs/agents/github.md` 同一批提交。
+  - 答「不裝」、repo 裡卻已經有這支 → 列給擁有者決定，不自己刪。限制寫在 [開票自檢](${CLAUDE_PLUGIN_ROOT}/references/ticket-check.md)「Actions 上跑」。
 - 寫或改這個 repo 的 GitHub Actions workflow 時，照 [Actions 規範](${CLAUDE_PLUGIN_ROOT}/skills/setup/references/actions-workflow-rules.md)；這個 repo 的例外寫進設定的「特殊禁忌」。
 
 ## 7. 歸屬登記與新專案
@@ -100,7 +104,7 @@ disable-model-invocation: true
 
 - 寫了哪些檔（`docs/agents/github.md`、`CLAUDE.md` 那一行），每個欄位填了什麼值。
 - 跳過了哪幾步、為什麼（沒有 remote、票開在別的 repo、私有擴充未設定）。
-- 建了、改名、保留了哪些標籤（標籤規則第八節最後一步的讀回）；開票自檢 workflow 裝了沒；自動刪分支的讀回值。
+- 建了、改名、保留了哪些標籤（標籤規則第八節最後一步的讀回）；開票自檢 workflow 裝了沒（答「裝」卻沒裝的，寫第 6 步擋下的原因）；自動刪分支的讀回值。
 - 要擁有者決定或動手的事（舊設定檔、保留的英文標籤、要補掛的票、Project 的 Auto-add）。
 
 ## 往後怎麼用這份設定

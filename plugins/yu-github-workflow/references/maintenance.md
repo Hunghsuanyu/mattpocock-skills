@@ -8,6 +8,12 @@
 - 開整合 PR（整合分支 → `main`）之前升一次，整批只升這一次。
 - 自動更新靠版本號判斷有沒有新版；忘了升，合併後各機器不會更新。
 
+## 部署面：開票自檢 workflow 也跟 `main`
+
+- 各 repo 裝的開票自檢 workflow 用 `ref: main` 取這個 fork，每次開票都跑 `main` 當下的腳本，不經版本號、不等 autoUpdate。
+- 裝在私有 repo 時，等於 fork `main` 的每一次推送都拿得到那支 workflow 的 token：`contents: read` 讀得到那個 repo 的原始碼，`issues: write` 改得了票。`persist-credentials: false` 只讓 checkout 不把憑證留在 git 設定裡，擋不到 env 裡的 `GH_TOKEN`。
+- 所以推 fork `main` 之前的審查，同時保護所有裝了這支 workflow 的 repo。
+
 ## 跟上游
 
 - 上游的檔案原封不動，當合併來源；這個 plugin 只放改寫過的 skill 與它們用到的腳本，全部在 `plugins/yu-github-workflow/` 底下。

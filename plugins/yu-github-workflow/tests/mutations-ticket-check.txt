@@ -23,3 +23,5 @@ s/(?:www\\.)?//
 s/ + "\]+)", re.I)/ + "]+)")/
 s/^          if \[ -n "\$nopin" \]; then$/          if false; then/
 s/^    if \[ -n "\$nopin" \]; then$/    if false; then/
+#   下一行：把 Project 查詢加回去（只在 project 記法跑）⇒ 要紅（project 記法的夾具抓得到，labels 記法的抓不到）。
+s/^  owner="\${LABEL_OWNER:-}"$/  [ "$(cfg_get "$cfg" 施工狀態記法)" != project ] || gh api graphql -f query='{projectItems}' || true; owner="${LABEL_OWNER:-}"/

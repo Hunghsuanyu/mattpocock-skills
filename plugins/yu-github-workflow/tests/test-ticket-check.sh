@@ -2,7 +2,8 @@
 # scripts/ticket-check.sh 的測試。只對假 gh 跑（mktemp 目錄、放在 PATH 最前面），不碰任何真 repo。
 #   上半：source 腳本取函式，逐格測判準（每格一張「從好票故意做壞一處」的陽性對照，好票先要是綠的）。
 #   下半：整支對假 gh 跑主體——設定讀不到（帳號不知道 ⇒ UNKNOWN 不判紅，⬛ 對照：同一份夾具有設定 ⇒ 紅）、
-#         格 9、錨點。
+#         格 9、錨點、project 記法不讀 Project。
+#   最後：開票自檢 workflow 範本的 run: 主體裡不得出現 ${{ github.event.…（靜態檢查）。
 # 票號一律在執行時組出（H 變數），檔案裡不寫「井號接數字」；署名裡的 id 用純字母的虛構值。
 #
 # 用法：tests/test-ticket-check.sh
@@ -393,6 +394,37 @@ printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels' 
   '只檢查誰開的票: someone-else' '```' > "$FH/config.md"
 run_main "$FH"
 want_main '開著的票沒有一張是設定的帳號開的 ⇒ ??' "$(grep -q '^?? .*沒有一張是 someone-else 開的' "$T/out"; echo $?)"
+
+# ── project 記法：狀態記在 Project 的 repo 也不讀 Project（狀態與機器標籤歸使用端的每日稽核） ──
+# 用獨立的呼叫帳本、跑完立刻斷言：只在 mode=project 才會走的查詢，labels 記法的夾具量不到。
+FP="$T/fx-p"; mkfx "$FP"
+printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: project' 'Project 所在: example-org 1' \
+  '只檢查誰開的票: owner-a' '```' > "$FP/config.md"
+: > "$T/calls-p.log"
+run_main "$FP" FAKE_LOG="$T/calls-p.log"
+want_main 'project 記法 ⇒ 照常跑完、rc=0、標籤照查' "$([ "$RC" = 0 ] && grep -qx -- '--' "$T/out" && has '標籤 OK' && ! has '讀不到 docs/agents/github.md'; echo $?)"
+want_main 'project 記法 ⇒ 不讀 Project' "$(! grep -Eq 'projectItems|projectV2|ProjectV2|project item' "$T/calls-p.log"; echo $?)"
+want_main '⬛ project 記法的帳本有記到呼叫（上一條不是空帳本的假綠）' "$(grep -q 'contents/docs/agents/github.md' "$T/calls-p.log" && grep -q 'nodes{number body}' "$T/calls-p.log"; echo $?)"
+
+# ── 開票自檢 workflow 範本：run: 主體裡不得出現 ${{ github.event.… }}（票的標題、內文等直接插進 shell＝指令注入） ──
+# 事件的值一律經 env: 進來、在 run: 裡用 "$變數" 讀。只看 run: 區塊，env: 裡的 ${{ github.event.issue.number }} 是正確寫法。
+TTC_WF="${TTC_DIR}/../skills/setup/references/ticket-check-workflow.yml"
+# stdin＝workflow YAML ⇒ 印每個 run: 的內容（區塊 `run: |`／`run: >` 印到縮排退回為止；單行 `run: x` 印 x），每個 run: 前印一行 `@@run`。
+wf_run_bodies() {
+  awk '
+    function ind(s) { match(s, /^ */); return RLENGTH }
+    inb { if ($0 ~ /^[[:space:]]*$/ || ind($0) > k) { print; next } inb = 0 }
+    /^[[:space:]]*(- )?run:[[:space:]]*[|>][-+]?[[:space:]]*$/ {
+      k = ind($0); if ($0 ~ /^[[:space:]]*- /) k += 2
+      print "@@run"; inb = 1; next }
+    /^[[:space:]]*(- )?run:[[:space:]]*[^|>[:space:]]/ { print "@@run"; v = $0; sub(/^[^:]*run:[[:space:]]*/, "", v); print v }'
+}
+wf_runs=$(wf_run_bodies < "$TTC_WF")
+want_main '⬛ 範本抽得到 run: 主體（有 @@run、含 ticket-check.sh、含最後的 exit）' "$(printf '%s\n' "$wf_runs" | grep -qx '@@run' && printf '%s\n' "$wf_runs" | grep -q 'ticket-check.sh' && printf '%s\n' "$wf_runs" | grep -q 'exit "\$rc"'; echo $?)"
+want_main '⬛ 範本本身有 ${{ github.event.（在 env: 與 if:；量法認得出這個寫法）' "$(grep -Eq '\$\{\{[[:space:]]*github\.event\.' "$TTC_WF"; echo $?)"
+if printf '%s\n' "$wf_runs" | grep -En '\$\{\{[[:space:]]*github\.event\.' > "$T/wf-hit"; then
+  fail=$((fail+1)); printf '🔴 workflow 範本的 run: 裡有 ${{ github.event.…（改成 env: 進來、run: 裡用 "$變數"）：\n'; sed 's/^/     /' "$T/wf-hit"
+else pass=$((pass+1)); fi
 
 # ── 只讀：整支跑下來沒有任何寫入型呼叫 ──
 want_main '假 gh 沒收到寫入型呼叫' "$(! grep -Eq -- '(^| )(-X|--method)( |$)|issue (edit|create|close|comment)|label (create|edit|delete)' "$FAKE_LOG"; echo $?)"
