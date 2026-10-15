@@ -1,7 +1,0 @@
-/撞名，中止/s/exit 64 ;;/;;/
-s/^if \[ "\${#MISS\[@\]}" -gt 0 \]; then$/if false; then/
-s/^if \[ "\${DRY}" = 1 \]; then echo "會：/gh api -X POST "repos\/${R}\/labels" > \/dev\/null; &/
-s/^if \[ "\${DRY}" = 1 \]; then echo "會：/gh api --method POST "repos\/${R}\/labels" > \/dev\/null; &/
-# 每行一發，各自單獨跑；第一欄是 sed 指令，被突變的檔是 scripts/labels-setup.sh。依序：
-#   撞名不停（⑥ 各案要紅）；寫完讀回不比對（⑦「寫入被吃掉」要紅）；
-#   dry-run 偷呼叫 gh api -X POST（② dry-run 寫入次數要紅，證明帳本記到 -X）；同上改用 --method（證明帳本記到 --method）。

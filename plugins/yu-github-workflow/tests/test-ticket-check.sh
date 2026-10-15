@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # scripts/ticket-check.sh 的測試。只對假 gh 跑（mktemp 目錄、放在 PATH 最前面），不碰任何真 repo。
 #   上半：source 腳本取函式，逐格測判準（每格一張「從好票故意做壞一處」的陽性對照，好票先要是綠的）。
-#   下半：整支對假 gh 跑主體——設定讀不到（UNKNOWN 不判紅，⬛ 對照：同一份夾具有設定 ⇒ 紅）、
-#         整合 PR 的 Closes 與 Refs、格 9。
+#   下半：整支對假 gh 跑主體——設定讀不到（帳號不知道 ⇒ UNKNOWN 不判紅，⬛ 對照：同一份夾具有設定 ⇒ 紅）、
+#         格 9、錨點。
 # 票號一律在執行時組出（H 變數），檔案裡不寫「井號接數字」；署名裡的 id 用純字母的虛構值。
 #
 # 用法：tests/test-ticket-check.sh
@@ -35,10 +35,8 @@ want_check '[閘門] 實機：線上／離線同快照一致'
 want_check 'Sheet 公式套用'                  # 方括號沒加引號就會變字元類而誤跳
 want_check 'Codex 外審腳本修正'
 
-# ══ 標籤格 1～4、8 ══
-M='機器A,機器B'
-L48='重驗證-外審,維護,P2-一般,機器A'
-P48='In Progress'
+# ══ 標籤格 1、2 ══
+L48='重驗證-外審,維護,P2-一般'
 L50='文件,中驗證,P2-一般'
 L41='資安,P2-一般'
 T48="[實作] ${H}41 第 0 批：測試地基、機器檢查、過期註解"
@@ -52,16 +50,16 @@ want_kind() {  # 標題 期望種類 [附註要含的字]
   case "$note" in *"${3:-}"*) pass=$((pass+1)) ;;
     *) fail=$((fail+1)); printf '🔴 票種附註 %s：要含「%s」、得「%s」\n' "$1" "$3" "$note" ;; esac
 }
-# state title labels [pstatus] [mode] [machines] ⇒ 不該有任何違規。mode 預設 project、machines 預設 M。
+# state title labels ⇒ 不該有任何違規。
 want_clean() {
-  local out; out=$(label_problems "$1" "$2" "$3" "${4:-}" "${5:-project}" "${6-$M}")
-  if [ -z "$out" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '🔴 該綠卻紅（%s｜%s｜%s）：%s\n' "$1" "$3" "${5:-project}" "$out"; fi
+  local out; out=$(label_problems "$1" "$2" "$3")
+  if [ -z "$out" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '🔴 該綠卻紅（%s｜%s）：%s\n' "$1" "$3" "$out"; fi
 }
-want_ng() {  # 格號 state title labels [pstatus] [mode] [machines] ⇒ 必須出現「格N」
-  local out; out=$(label_problems "$2" "$3" "$4" "${5:-}" "${6:-project}" "${7-$M}")
+want_ng() {  # 格號 state title labels ⇒ 必須出現「格N」
+  local out; out=$(label_problems "$2" "$3" "$4")
   case "$out" in
     *"格$1"*) pass=$((pass+1)); printf '   ✔ 陽性對照 格%s 紅：%s\n' "$1" "$(printf '%s' "$out" | tr '\n' '／')" ;;
-    *) fail=$((fail+1)); printf '🔴 格%s 該紅卻沒紅（%s｜%s｜%s）：%s\n' "$1" "$2" "$4" "${6:-project}" "$out" ;;
+    *) fail=$((fail+1)); printf '🔴 格%s 該紅卻沒紅（%s｜%s）：%s\n' "$1" "$2" "$4" "$out" ;;
   esac
 }
 
@@ -80,131 +78,30 @@ want_kind "$T50" 一般
 want_kind '[修正] preflight' 一般
 
 # ── 基準票：要是綠的 ──
-want_clean open   "$T48" "$L48" "$P48"
+want_clean open   "$T48" "$L48"
 want_clean closed "$T50" "$L50"
-want_clean open   "$T41" "$L41" 'Todo'          # SPEC 沒掛驗證不判紅
+want_clean open   "$T41" "$L41"                 # SPEC 沒掛驗證不判紅
 want_clean open   '協作指揮台：票序' ''           # 協調類什麼都不必掛
-want_clean OPEN   "$T48" "$L48" "$P48"          # 大寫的 state
-want_clean open   "$T48" '重驗證-外審,維護,P2-一般' 'Todo'
+want_clean OPEN   "$T48" "$L48"                 # 大寫的 state
 want_clean closed '[實作] 舊票' '重驗證-外審'    # 已關的舊票不查格 1
+want_clean open   "$T48" "$L48,施工中,機器A"     # 狀態與機器標籤不歸這支管
 
 # ── 格 1：必掛 ──
-want_ng 1 open "$T48" "${L48/重驗證-外審,/}" "$P48"
-want_ng 1 open "$T48" "${L48/維護,/}" "$P48"
-want_ng 1 open "$T48" "${L48/P2-一般,/}" "$P48"
-want_ng 1 open "$T41" "${L41/,P2-一般/}" 'Todo'
-want_ng 1 open '[決定] 搬進組織後誰能寫' '改善,P2-一般' 'Todo'
-want_ng 1 open "$T50" "${L50/中驗證,/}" 'Todo'
-want_ng 1 open "$T48" "${L48/重驗證-外審/待驗證}" "$P48"   # 待驗證是狀態不是驗證分級（逐字比對）
-want_ng 1 open "$T48" "${L48/維護/類型:維護}" "$P48"       # 帶前綴的舊名不算數
+want_ng 1 open "$T48" "${L48/重驗證-外審,/}"
+want_ng 1 open "$T48" "${L48/維護,/}"
+want_ng 1 open "$T48" "${L48/,P2-一般/}"
+want_ng 1 open "$T41" "${L41/,P2-一般/}"
+want_ng 1 open '[決定] 搬進組織後誰能寫' '改善,P2-一般'
+want_ng 1 open "$T50" "${L50/中驗證,/}"
+want_ng 1 open "$T48" "${L48/重驗證-外審/待驗證}"   # 待驗證是狀態不是驗證分級（逐字比對）
+want_ng 1 open "$T48" "${L48/維護/類型:維護}"       # 帶前綴的舊名不算數
 
 # ── 格 2：單選 ──
-want_ng 2 open   "$T48" "$L48,錯誤" "$P48"
-want_ng 2 open   "$T48" "$L48,P0-阻斷" "$P48"
-want_ng 2 open   "$T48" "$L48,中驗證" "$P48"
+want_ng 2 open   "$T48" "$L48,錯誤"
+want_ng 2 open   "$T48" "$L48,P0-阻斷"
+want_ng 2 open   "$T48" "$L48,中驗證"
 want_ng 2 closed "$T50" "$L50,改善"
-want_clean open  "$T48" "$L48,等擁有者" "$P48"   # 等待擁有者的標籤不是狀態組
-
-# ── 格 3：找得到人 ──
-L0='重驗證-外審,維護,P2-一般'
-want_clean open "$T48" "$L48" '待驗證'
-want_clean open "$T48" "$L0"  '待合併'
-want_clean open "$T48" "$L0,等擁有者" 'Todo'
-want_clean open "$T48" "$L0"  'Todo'
-want_clean open "$T48" "$L0"  '?'                 # 問不到：不判（呼叫端印 UNKNOWN）
-want_ng 3 open "$T48" "$L0" 'In Progress'
-want_ng 3 open "$T48" "$L0" '待驗證'
-# labels 記法：狀態看標籤
-want_ng 3 open "$T48" "$L0,施工中" '' labels
-want_ng 3 open "$T48" "$L0,待驗證" '' labels
-want_clean open "$T48" "$L0,施工中,機器B" '' labels
-want_clean open "$T48" "$L0" '' labels             # 沒開工
-want_clean open "$T48" "$L0" 'In Progress' labels  # labels 記法不看 Status
-# 不用機器標籤、或設定讀不到 ⇒ 格 3 不判
-want_clean open "$T48" "$L0,施工中" '' labels ''
-want_clean open "$T48" "$L0,施工中" '' '?' '?'
-want_clean open "$T48" "$L0" 'In Progress' project '?'
-
-# ── 格 8：狀態只有一處（project 記法） ──
-want_ng 8 open "$T48" "$L0"  'NONE'                # 狀態記在 Project 的 repo：票不在 Project ⇒ 紅
-want_clean open "$T48" "$L0"  'NONE' labels        # labels 記法：不在 Project＝正常
-want_clean open "$T48" "$L48" "$P48"
-want_clean open "$T48" "$L0"  '?'                  # 問不到 ≠ 不在 Project
-want_clean open '協作指揮台：票序' '' 'NONE'         # 協調類不要求在 Project
-want_clean closed "$T50" "$L50" 'NONE'             # 已關的票不查格 8
-want_ng 8 open "$T48" "$L48,施工中" "$P48"         # 狀態標籤與 Status 並存
-want_ng 8 open "$T48" "$L0,待驗證"  'NONE'
-want_ng 8 open '協作指揮台：票序' '施工中' 'Todo'    # 協調類也不該掛
-want_clean closed "$T50" "$L50,施工中"             # 已關的票不查格 8
-want_clean open "$T48" "$L48,施工中" "$P48" labels # labels 記法：狀態標籤是正常的
-want_clean open "$T48" "$L0,施工中" 'NONE' '?' '?' # 設定讀不到 ⇒ 不判（呼叫端印 UNKNOWN）
-
-# ── 格 4：關票清乾淨 ──
-want_ng 4 closed "$T50" "$L50,機器A"
-want_ng 4 closed "$T50" "$L50,機器B"
-want_clean open  "$T50" "$L50,機器A" "$P48"        # 同樣的標籤、票開著 ⇒ 綠
-want_clean closed "$T50" "$L50,機器A" '' project '?'   # 設定讀不到 ⇒ 不判
-want_clean closed "$T50" "$L50,機器A" '' project ''    # 這個 repo 不用機器標籤 ⇒ 不判
-want_clean closed "$T50" "$L50,機器" ''                # 名字不對＝不是機器標籤（逐字比對）
-
-# ══ 格 5：不驗自己的票（新舊兩種署名） ══
-want_v5() {  # 期望（OK/NG/UNKNOWN） 署名行…（一個參數＝一則留言的最後一行）
-  local want="$1" out; shift
-  out=$(printf '%s\n' "$@" | self_verify_verdict)
-  case "$out" in
-    "$want "*) pass=$((pass+1)); [ "$want" = OK ] || printf '   ✔ 格5 %s\n' "$out" ;;
-    *) fail=$((fail+1)); printf '🔴 格5 要 %s、得 %s（%s）\n' "$want" "$out" "$*" ;;
-  esac
-}
-# 舊署名：角色｜機器｜軌號｜執行者｜分支
-B='— 🔨 施工軌｜機器A｜軌3｜session PqrsTuvw｜分支 docs/50-names'
-C='— 📌 指揮台軌｜機器A｜軌3｜session PqrsTuvw'
-want_v5 OK "$B" "$C" '一般留言的最後一行'         # 指揮台同 session 不算驗證
-want_v5 OK "$B" '— 🔍 驗證軌｜機器B｜軌4｜session KlmnOpqr｜重跑結果：通過'
-want_v5 OK ''
-want_v5 NG "$B" '— 🔍 驗證軌｜機器A｜軌3｜session PqrsTuvw｜重跑結果：通過'
-want_v5 NG "$B" '— 🔍 驗證軌｜機器A｜軌3｜session PqrsTuvwXyzXyzXyzXyzXyz｜重跑結果：通過'   # 驗證寫全碼
-want_v5 NG '— 🔨 施工軌｜機器A｜軌3｜session PqrsTuvwXyzXyzXyzXyzXyz｜分支 x' '— 🔍 驗證軌｜機器A｜軌3｜session PqrsTuvw｜重跑結果：通過'   # 施工寫全碼
-want_v5 NG "$B" '— 🔨 施工軌｜機器B｜軌5｜session AAAAAAAA｜分支 x' '— 🔍 驗證軌｜機器B｜軌5｜session AAAAAAAA｜重跑結果：通過'   # 換手後的施工者自驗
-AB='— 🔨 施工軌｜機器A｜軌3｜agent-ghijklmn@PqrsTuvw｜分支 x'
-want_v5 NG "$AB" '— 🔍 驗證軌｜機器A｜軌3｜agent-opqrstuv@PqrsTuvw｜重跑結果：通過'   # 同對話兩個子代理：session 部分相同 ⇒ 自驗
-want_v5 NG "$AB" '— 🔍 驗證軌｜機器A｜軌3｜agent-ghijklmn@PqrsTuvw｜重跑結果：通過'   # 同一個子代理
-want_v5 NG "$B"  '— 🔍 驗證軌｜機器A｜軌3｜agent-opqrstuv@PqrsTuvw｜重跑結果：通過'   # 對話施工、自己派的子代理驗
-want_v5 NG "$AB" '— 🔍 驗證軌｜機器A｜軌3｜session PqrsTuvw｜重跑結果：通過'          # 派工的對話驗自己子代理的工作 ⇒ 自驗
-want_v5 OK "$B"  '— 🔍 驗證軌｜機器B｜軌4｜agent-wxyzwxyz@KlmnOpqr｜重跑結果：通過'   # 別的對話派的子代理
-want_v5 UNKNOWN "$B" '— 🔍 驗證軌｜機器B｜軌4｜重跑結果：通過'   # 驗證署名沒有執行者
-want_v5 UNKNOWN '— 🔍 驗證軌｜機器B｜軌4｜session KlmnOpqr｜重跑結果：通過'   # 沒有施工署名可比
-# 新署名：角色｜機器｜執行者｜分支（labels.md 第三節）
-NB='— 🔨 施工｜機器A｜session PqrsTuvw｜分支 fix/12-null-check'
-want_v5 OK "$NB" '— 🔍 驗證｜機器B｜session KlmnOpqr｜分支 fix/12-null-check｜結果：通過'
-want_v5 NG "$NB" '— 🔍 驗證｜機器B｜session PqrsTuvw｜分支 fix/12-null-check｜結果：通過'          # 同一個執行者
-want_v5 NG "$NB" '— 🔍 驗證｜機器A｜驗證子代理 agent-opqrstuv@PqrsTuvw｜分支 x｜結果：通過'          # 自己派的子代理驗
-NAB='— 🔨 施工｜機器A｜施工子代理 agent-ghijklmn@PqrsTuvw｜分支 x'
-want_v5 NG "$NAB" '— 🔍 驗證｜機器A｜驗證子代理 agent-opqrstuv@PqrsTuvw｜分支 x｜結果：通過'       # 同對話兩個子代理 ⇒ 自驗
-want_v5 OK "$NAB" '— 🔍 驗證｜機器B｜驗證子代理 agent-opqrstuv@KlmnOpqr｜分支 x｜結果：通過'       # 別的對話派的子代理 ⇒ 獨立
-want_v5 NG "$NAB" '— 🔍 驗證｜機器A｜驗證子代理 agent-ghijklmn@PqrsTuvw｜分支 x｜結果：通過'
-want_v5 UNKNOWN "$NB" '— 🔍 驗證｜機器B｜分支 x｜結果：通過'     # 新署名缺執行者欄
-# 新舊混用：舊施工署名＋新驗證署名
-want_v5 NG "$B" '— 🔍 驗證｜機器B｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 OK "$B" '— 🔍 驗證｜機器B｜session KlmnOpqr｜分支 x｜結果：通過'
-# 多則驗證署名：任一則判得出自驗就 NG，不被讀不出的那一則（UNKNOWN）蓋掉；順序前後都一樣
-want_v5 NG "$NB" '— 🔍 驗證｜機器B｜分支 x｜結果：通過' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 NG "$NB" '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過' '— 🔍 驗證｜機器B｜分支 x｜結果：通過'
-want_v5 UNKNOWN "$NB" '— 🔍 驗證｜機器B｜分支 x｜結果：通過' '— 🔍 驗證｜機器B｜session KlmnOpqr｜分支 x｜結果：通過'
-# 欄位對位：執行者字樣只出現在別的欄（新署名的分支欄）不算執行者
-want_v5 UNKNOWN "$NB" '— 🔍 驗證｜機器B｜—｜分支 session PqrsTuvw｜結果：通過'
-# 署名前面多了 markdown 修飾（粗體、引用）照認；認不出開頭、但行內有「🔍 驗證」⇒ UNKNOWN，不是「沒有驗證署名」
-want_v5 NG "$NB" '**— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過**'
-want_v5 NG "$NB" '> — 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 NG '> **— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x**' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 UNKNOWN "$NB" '結論如上 🔍 驗證｜機器A｜session PqrsTuvw'
-# 第 3 輪：🔍 後面沒空白仍是驗證署名（不可印「沒有驗證署名」）；施工署名前面帶 <sub>、清單符號 `- ` 照認
-want_v5 NG "$NB" '— 🔍驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 NG "$NB" '—🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 NG '— 🔨施工｜機器A｜session PqrsTuvw｜分支 x' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 NG '<sub>— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x</sub>' '— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過'
-want_v5 NG '- — 🔨 施工｜機器A｜session PqrsTuvw｜分支 x' '<sub>— 🔍 驗證｜機器A｜session PqrsTuvw｜分支 x｜結果：通過</sub>'
-want_v5 OK '<sub>— 🔨 施工｜機器A｜session PqrsTuvw｜分支 x</sub>' '- — 🔍 驗證｜機器B｜session KlmnOpqr｜分支 x｜結果：通過'
+want_clean open  "$T48" "$L48,等擁有者"   # 等待擁有者的標籤不是狀態組
 
 # ══ 格 6：衍生（掛了 `衍生` ⇒ 上層必須是 SPEC） ══
 want_d6() {  # 期望（clean／NG） 上層票標題（空＝沒有上層） labels
@@ -225,49 +122,6 @@ want_d6 NG    "$T48" "$L50,衍生"                  # 掛在施工票底下 ⇒ 
 want_d6 NG    '[查證] 角色來源' "衍生,$L50"
 want_d6 NG    ''     "$L50,衍生"
 
-# ══ 格 7：合併後有步驟的票，會不會被 PR 自動關 ══
-want_c7() {
-  local out; out=$(closes_problem "$2" "$3")
-  case "$1:$out" in
-    clean:)   pass=$((pass+1)) ;;
-    NG:格7*)  pass=$((pass+1)) ;;
-    *) fail=$((fail+1)); printf '🔴 格7 要 %s（PR「%s」）：得「%s」\n' "$1" "$3" "$out" ;;
-  esac
-}
-B19='## 完成定義
-K0～K3 重跑通過；擁有者合併部署；K4 部署後補算貼回本票後關票。'
-B13='- [ ] 合併部署後：在說明票留言'
-BPLAIN='## 完成定義
-K1、K2 重跑通過；擁有者合併。'
-want_c7 NG    "$B19"    "${H}24"
-want_c7 NG    "$B13"    "${H}25,${H}26"
-want_c7 clean "$B19"    ''
-want_c7 clean "$BPLAIN" "${H}9"
-want_c7 clean ''        "${H}9"
-
-# 整合 PR 內文的關閉關鍵字
-want_refs() {  # 期望（空白分隔的票號） PR 內文
-  local got; got=$(pr_closing_refs "$2" example-org/app-one | tr '\n' ' ' | sed 's/ $//')
-  if [ "$got" = "$1" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '🔴 整合 PR 關閉關鍵字：要「%s」、得「%s」（%s）\n' "$1" "$got" "$2"; fi
-}
-want_refs '5'     "$(printf 'Closes %s5' "$H")"
-want_refs '5 7'   "$(printf '整合三張票\n- Closes %s5\n- fixes %s7\n- Refs %s9' "$H" "$H" "$H")"   # Refs 不算
-want_refs '5'     "$(printf 'Resolved: %s5' "$H")"
-want_refs ''      "$(printf 'Refs %s5' "$H")"
-want_refs ''      "$(printf '`Closes %s5`' "$H")"                       # code span 裡 GitHub 不認
-want_refs '5'     "$(printf 'closes example-org/app-one%s5' "$H")"      # 指名本 repo
-want_refs ''      "$(printf 'closes example-org/other%s5' "$H")"        # 別的 repo
-want_refs ''      "$(printf 'encloses %s5' "$H")"                       # 字中間不算關鍵字
-want_refs '7'     "$(printf '```\nCloses %s5\n```\nCloses %s7' "$H" "$H")"   # fenced（```）裡不算，圍欄外照算
-want_refs '7'     "$(printf '~~~bash\nfixes %s5\n```\nfixes %s6\n~~~\nfixes %s7' "$H" "$H" "$H")"   # ~~~ 只被 ~~~ 關上
-want_refs '7'     "$(printf '````\n```\nCloses %s5\n```\n````\nCloses %s7' "$H" "$H")"   # 四個反引號開的區塊，三個反引號關不上
-want_refs '5'     'Closes https://github.com/example-org/app-one/issues/5'     # 寫票的網址也算（GitHub 認）
-want_refs '6'     'fixes https://github.com/Example-Org/App-One/issues/6'      # 網址大小寫不拘
-want_refs ''      'Closes https://github.com/example-org/other/issues/5'       # 別的 repo 的網址不算
-want_refs '5'     "$(printf '```x``` 是行內的 code span，不是圍欄\nCloses %s5' "$H")"   # 反引號圍欄的資訊字串不可含反引號
-want_refs '5'     "$(printf '```x```\nCloses %s5' "$H")"
-want_refs ''      "$(printf '```x\nCloses %s5\n```' "$H")"                 # ⬛ 對照：真的圍欄照樣不算
-
 # ══ 設定區塊解析 ══
 CFG_DOC="$(printf '%s\n' '# GitHub 工作流設定' '' '## 機器讀的欄位' '' '```text' \
   '票開在哪個 repo: 本 repo' '施工狀態記法: project' 'Project 所在: example-org 3' \
@@ -278,18 +132,9 @@ want_cfg() {  # 欄位 期望
   if [ "$got" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '🔴 設定 %s：要「%s」、得「%s」\n' "$1" "$2" "$got"; fi
 }
 want_cfg 施工狀態記法 project                 # 只讀「機器讀的欄位」底下第一個 text 區塊
-want_cfg 'Project 所在' 'example-org 3'
-want_cfg 機器標籤名 '機器A,機器B'
 want_cfg 只檢查誰開的票 owner-a
 want_cfg 等待擁有者的標籤名 ''                   # 沒有這個欄位 ⇒ 空
 want_cfg 特殊禁忌 '無'                           # 值去頭尾空白（含 tab）
-want_list() {  # 原值 期望
-  local got; got=$(trim_list "$1")
-  if [ "$got" = "$2" ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '🔴 清單去空白 %s：要「%s」、得「%s」\n' "$1" "$2" "$got"; fi
-}
-want_list '機器A, 機器B ' '機器A,機器B'           # 機器標籤逐個去空白
-want_list '機器A' '機器A'
-
 # ══ 格 9：做完能展示什麼 ══
 want_d9() {  # 期望（clean／NG） 內文
   local out; out=$(printf '%s\n' "$2" | demo_problem)
@@ -330,17 +175,12 @@ case "$1 $2" in
   'api graphql')
     case "$*" in
       *'parent{title}'*)                   fx parents ;;
-      *projectItems*)                      fx pstatus ;;
-      *closedByPullRequestsReferences*)    fx closers ;;
+      *'nodes{number body}'*)              fx bodies ;;
       *) echo "假 gh：沒預期的 graphql $*" >&2; exit 97 ;;
     esac ;;
   'api --paginate')
     case "$3" in
       repos/*/labels*)        fx labels ;;
-      repos/*/pulls*)         fx pulls ;;
-      repos/*/issues/*/comments*) n="${3#repos/*/issues/}"; n="${n%%/*}"
-                                  [ ! -f "$FX/comments-fail-$n" ] || { echo 'HTTP 502: Bad Gateway' >&2; exit 1; }
-                                  fx "comments-$n" ;;
       repos/*/issues*)        fx issues ;;
       *) echo "假 gh：沒預期的呼叫 $*" >&2; exit 97 ;;
     esac ;;
@@ -351,9 +191,8 @@ case "$1 $2" in
                      422) echo "gh: No commit found for SHA: $c (HTTP 422)" >&2; exit 1 ;;
                      404) echo 'gh: Not Found (HTTP 404)' >&2; exit 1 ;;
                    esac; exit 0 ;;
-      *) cat "$FX/default_branch" ;;
+      *) echo "假 gh：沒預期的呼叫 $*" >&2; exit 97 ;;
     esac ;;
-  'issue view') [ ! -f "$FX/view-fail-$3" ] || { echo 'HTTP 502: Bad Gateway' >&2; exit 1; }; fx "view-$3" ;;
   *) echo "假 gh：沒預期的呼叫 $*" >&2; exit 97 ;;
 esac
 FAKE
@@ -370,30 +209,26 @@ ANC="## 錨點
 DEMO='## 做完能展示什麼
 跑出來的清單。'
 GOODL='改善,P2-一般,中驗證'
-# 票 1 的內文（與會關它的原生 PR）：票內文只從「會關票的 PR」那一次 GraphQL 拿（每張開著的票都有 body），不逐票 issue view。
-setbody() {  # 目錄 內文 [原生會關它的 PR]
-  printf '%s\n \n%s\n' '[實作] 甲' "$2" > "$1/view-1"
-  printf '1\t%s\t%s\n3\t\t%s\n' "${3:-}" "$(b64 "$2")" "$(b64 '## 背景')" > "$1/closers"
+# 票 1 的內文：票內文只從「開著的票內文」那一次 GraphQL 拿（每張開著的票都有 body），不逐票 issue view。
+setbody() {  # 目錄 內文
+  printf '1\t%s\n3\t%s\n' "$(b64 "$2")" "$(b64 '## 背景')" > "$1/bodies"
 }
 # 一個 repo 的夾具：$1＝目錄、$2＝已關的票 2 多掛的標籤；票 1 開著（施工中）、票 2 已關、票 3 SPEC。
 mkfx() {
   local d="$1" extra="${2:-}"; mkdir -p "$d"
   printf '錯誤\n文件\n改善\n施工中\n待驗證\n機器A\n機器B\n' > "$d/labels"
   : > "$d/parents"
-  printf 'main' > "$d/default_branch"
-  : > "$d/pulls"
   {
     printf '1\topen\towner-a\t[實作] 甲\t%s\n' "$GOODL,施工中,機器A"
     printf '2\tclosed\towner-a\t[實作] 乙\t%s\n' "$GOODL$extra"
     printf '3\topen\towner-a\t[SPEC] 丙\t改善,P2-一般\n'
   } > "$d/issues"
-  printf '%s\n \n%s\n' '[SPEC] 丙' '## 背景' > "$d/view-3"
   setbody "$d" "$DEMO
 $ANC"
 }
-cfg_labels() {  # 目錄 機器標籤名
-  printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels' 'Project 所在: 不適用' \
-    "機器標籤名: $2" '只檢查誰開的票: owner-a' '```' > "$1/config.md"
+cfg_labels() {  # 目錄
+  printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels' \
+    '只檢查誰開的票: owner-a' '```' > "$1/config.md"
 }
 run_main() {  # 夾具目錄 [env 指派…] ⇒ 輸出放 $T/out，退出碼放 RC
   local d="$1"; shift
@@ -404,47 +239,21 @@ want_main() {  # 說明 條件（0＝成立）
   if [ "$2" = 0 ]; then pass=$((pass+1)); else fail=$((fail+1)); printf '🔴 主體：%s\n' "$1"; sed 's/^/     /' "$T/out"; fi
 }
 
-# ── 設定讀不到：格 3、4、8 印 UNKNOWN、不判紅；其他格照跑 ──
-FA="$T/fx-a"; mkfx "$FA" ",機器A"   # 已關還掛機器標籤：有設定就該紅
+# ── 設定讀不到：只檢查誰開的票改由 LABEL_OWNER 給；兩者都沒有 ⇒ 標籤格 UNKNOWN、不判紅 ──
+FA="$T/fx-a"; mkfx "$FA" ",錯誤"   # 已關的票掛兩個類型：知道帳號就該紅（格 2）
 run_main "$FA" LABEL_OWNER=owner-a
-want_main '設定讀不到 ⇒ rc=0（UNKNOWN 不判紅）' "$([ "$RC" = 0 ]; echo $?)"
 want_main '設定讀不到 ⇒ 印出讀不到設定的 ?? 行' "$(has '讀不到 docs/agents/github.md'; echo $?)"
-want_main '設定讀不到 ⇒ 印出格 3、4、8 不判' "$(has '格 3、4、8 不判'; echo $?)"
-want_main '設定讀不到 ⇒ 沒有格 4 的 NG' "$(! has '格4'; echo $?)"
-want_main '設定讀不到 ⇒ 標籤格照跑（開著的票 OK）' "$(has '標籤 OK（一般票）'; echo $?)"
-# ⬛ 對照：同一份夾具、有設定（labels 記法、機器標籤 機器A,機器B）⇒ 已關的票掛著機器A 要紅
-cp -R "$FA" "$T/fx-a2"; cfg_labels "$T/fx-a2" '機器A,機器B'
-run_main "$T/fx-a2"
-want_main '⬛ 有設定 ⇒ 格 4 紅、rc=1' "$([ "$RC" = 1 ] && has '標籤 格4'; echo $?)"
-want_main '⬛ 有設定 ⇒ 只檢查誰開的票從設定讀到（不必 LABEL_OWNER）' "$(! has '不知道只檢查誰開的票'; echo $?)"
-want_main '⬛ 有設定 ⇒ 不印格 3、4、8 不判' "$(! has '格 3、4、8 不判'; echo $?)"
-# 設定讀不到、也沒有 LABEL_OWNER ⇒ 標籤格整個 UNKNOWN，錨點照跑
+want_main '設定讀不到、有 LABEL_OWNER ⇒ 標籤格照跑（格 2 紅、rc=1）' "$([ "$RC" = 1 ] && has '標籤 格2'; echo $?)"
 run_main "$FA"
-want_main '不知道誰開的票 ⇒ 印 UNKNOWN、rc=0、錨點照跑' "$([ "$RC" = 0 ] && has '不知道只檢查誰開的票' && has '錨點 SHA 連結 1 條'; echo $?)"
-
-# ── 整合 PR：Closes 了有合併後步驟的票 ⇒ 格 7；Refs 不算；目標不是預設分支不算 ──
-FB="$T/fx-b"; mkfx "$FB"; cfg_labels "$FB" '機器A,機器B'
-AFTER="$DEMO
-## 完成定義
-合併後由擁有者補跑一次。"
-setbody "$FB" "$AFTER
-$ANC"   # 原生來源刻意是空的
-printf '40\tmain\t%s\n' "$(b64 "$(printf '整合分支合併\n- Closes %s1\n- Refs %s3' "$H" "$H")")" > "$FB/pulls"
-run_main "$FB"
-want_main '整合 PR 寫 Closes ⇒ 格 7 紅' "$([ "$RC" = 1 ] && has "格7" && has "PR ${H}40"; echo $?)"
-printf '40\tmain\t%s\n' "$(b64 "$(printf '整合分支合併\n- Refs %s1' "$H")")" > "$FB/pulls"
-run_main "$FB"
-want_main '⬛ 同一張票、整合 PR 改寫 Refs ⇒ 格 7 不紅' "$([ "$RC" = 0 ] && ! has "格7"; echo $?)"
-printf '41\tinteg/9-x\t%s\n' "$(b64 "$(printf 'Closes %s1' "$H")")" > "$FB/pulls"
-run_main "$FB"
-want_main '目標不是預設分支的 PR 寫 Closes ⇒ 格 7 不紅' "$([ "$RC" = 0 ] && ! has "格7"; echo $?)"
-: > "$FB/pulls"; setbody "$FB" "$AFTER
-$ANC" "${H}42"
-run_main "$FB"
-want_main '原生來源（closedByPullRequestsReferences）照舊認得' "$([ "$RC" = 1 ] && has "PR ${H}42"; echo $?)"
+want_main '設定讀不到、也沒有 LABEL_OWNER ⇒ 印 UNKNOWN、rc=0、錨點照跑' "$([ "$RC" = 0 ] && has '不知道只檢查誰開的票' && ! has '格2' && has '錨點 SHA 連結 1 條'; echo $?)"
+# ⬛ 對照：同一份夾具、有設定 ⇒ 帳號從設定讀到，已關的票格 2 紅
+cp -R "$FA" "$T/fx-a2"; cfg_labels "$T/fx-a2"
+run_main "$T/fx-a2"
+want_main '⬛ 有設定 ⇒ 格 2 紅、rc=1' "$([ "$RC" = 1 ] && has '標籤 格2'; echo $?)"
+want_main '⬛ 有設定 ⇒ 只檢查誰開的票從設定讀到（不必 LABEL_OWNER）' "$(! has '不知道只檢查誰開的票'; echo $?)"
 
 # ── 格 9：施工票缺段、空段 ⇒ 紅；SPEC 不查 ──
-FC="$T/fx-c"; mkfx "$FC"; cfg_labels "$FC" '機器A,機器B'
+FC="$T/fx-c"; mkfx "$FC"; cfg_labels "$FC"
 setbody "$FC" "$ANC"
 run_main "$FC"
 want_main '缺「做完能展示什麼」⇒ 格 9 紅、rc=1' "$([ "$RC" = 1 ] && has '格9 沒有「做完能展示什麼」段'; echo $?)"
@@ -459,25 +268,20 @@ $ANC"
 run_main "$FC"
 want_main '⬛ 補上內容 ⇒ 全綠' "$([ "$RC" = 0 ] && ! has '格9'; echo $?)"
 
-# ── 大輸出：會關票的 PR 清單（含每張票內文）遠大於管線緩衝時，查前面的票不可以讓整支死在半路 ──
+# ── 大輸出：開著的票內文清單遠大於管線緩衝時，查前面的票不可以讓整支死在半路 ──
 cp -R "$FC" "$T/fx-d"
 pad=$(b64 "$(head -c 3000 /dev/zero | tr '\0' 'x')")
-i=100; while [ "$i" -lt 200 ]; do printf '%s\t\t%s\n' "$i" "$pad" >> "$T/fx-d/closers"; i=$((i+1)); done
+i=100; while [ "$i" -lt 200 ]; do printf '%s\t%s\n' "$i" "$pad" >> "$T/fx-d/bodies"; i=$((i+1)); done
 run_main "$T/fx-d"
 want_main '大輸出 ⇒ 跑到最後一行總結、rc=0' "$([ "$RC" = 0 ] && has '施工票 1 張' && ! has 'Broken pipe'; echo $?)"
 
-# ── 單張票內文問不到（會關票 PR 的那次 GraphQL 裡缺這張的列）⇒ 那張印 ??、照樣跑到總結、rc=0 ──
-FE="$T/fx-e"; mkfx "$FE"; cfg_labels "$FE" '機器A,機器B'
-grep -v '^1	' "$FE/closers" > "$FE/closers.x"; mv "$FE/closers.x" "$FE/closers"
+# ── 單張票內文問不到（內文那次 GraphQL 裡缺這張的列）⇒ 那張印 ??、照樣跑到總結、rc=0 ──
+FE="$T/fx-e"; mkfx "$FE"; cfg_labels "$FE"
+grep -v '^1	' "$FE/bodies" > "$FE/bodies.x"; mv "$FE/bodies.x" "$FE/bodies"
 run_main "$FE"
-want_main 'closers 缺這張的列 ⇒ ?? 問不到內文、跑到總結、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*問不到這張票的內文" "$T/out" && grep -qx -- '--' "$T/out" && has '施工票 0 張'; echo $?)"
-# ── 留言 API 失敗 ⇒ 格 5 印 ??、不判紅 ──
-FK="$T/fx-k"; mkfx "$FK"; cfg_labels "$FK" '機器A,機器B'; : > "$FK/comments-fail-1"
-run_main "$FK"
-want_main '留言讀不到 ⇒ 格 5 ??、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*格5 問不到留言" "$T/out"; echo $?)"
-
+want_main 'bodies 缺這張的列 ⇒ ?? 問不到內文、跑到總結、rc=0' "$([ "$RC" = 0 ] && grep -q "^?? .*${H}1 .*問不到這張票的內文" "$T/out" && grep -qx -- '--' "$T/out" && has '施工票 0 張'; echo $?)"
 # ── 錨點那顆 SHA：422（repo 讀得到、SHA 不在）⇒ NG；404（沒權限讀的私有 repo 也是 404）⇒ ??，不判紅 ──
-FQ="$T/fx-q"; mkfx "$FQ"; cfg_labels "$FQ" '機器A,機器B'
+FQ="$T/fx-q"; mkfx "$FQ"; cfg_labels "$FQ"
 echo 422 > "$FQ/commit-$SHA"
 run_main "$FQ"
 want_main 'SHA 422 ⇒ 不存在、rc=1' "$([ "$RC" = 1 ] && grep -q "^NG .*${H}1 .*SHA 在 example-org/app-one \*\*不存在\*\*" "$T/out"; echo $?)"
@@ -487,7 +291,7 @@ want_main 'SHA 404 ⇒ ?? 問不到、不判不存在、rc=0' "$([ "$RC" = 0 ] &
 want_main 'SHA 404 ⇒ 總結的「問不到」算進這一處' "$(has '問不到 1 處'; echo $?)"
 
 # ── 錨點「無」：錨點段明寫一行「- 無：<理由>」⇒ OK、印出理由；理由空 ⇒ NG；完全沒有錨點段照樣 NG ──
-FW="$T/fx-w"; mkfx "$FW"; cfg_labels "$FW" '機器A,機器B'
+FW="$T/fx-w"; mkfx "$FW"; cfg_labels "$FW"
 setbody "$FW" "$DEMO
 ## 錨點
 - 無：這張只決定下一階段要開哪些票，不碰程式碼"
@@ -530,8 +334,8 @@ setbody "$FW" "$DEMO
 run_main "$FW"
 want_main '「無」又放了沒釘 SHA 的檔案連結 ⇒ NG、rc=1' "$([ "$RC" = 1 ] && grep -q '^NG .*沒釘 SHA 的檔案連結.*blob/main/a.sh' "$T/out"; echo $?)"
 
-# 第 3 輪：錨點連結的認法與 anchor-overlap 同一套（www.、大寫 host、/blame/、/raw/、raw 網域都算、都逐顆驗存在）
-FV="$T/fx-v"; mkfx "$FV"; cfg_labels "$FV" '機器A,機器B'
+# 第 3 輪：錨點連結的認法（www.、大寫 host、/blame/、/raw/、raw 網域都算、都逐顆驗存在）
+FV="$T/fx-v"; mkfx "$FV"; cfg_labels "$FV"
 for u in "https://www.github.com/example-org/app-one/blob/${SHA}/a.sh" "https://GitHub.com/example-org/app-one/blob/${SHA}/a.sh" \
          "https://github.com/example-org/app-one/blame/${SHA}/a.sh" "https://raw.githubusercontent.com/example-org/app-one/${SHA}/a.sh"; do
   setbody "$FV" "$DEMO
@@ -552,24 +356,22 @@ run_main "$FV"
 want_main '有 SHA 連結又有沒釘 SHA 的檔案連結 ⇒ 印 !!、那條沒被驗' "$([ "$RC" = 0 ] && grep -q '^!! .*blob/main/b.sh' "$T/out"; echo $?)"
 
 # ── 錨點 SHA 要剛好 40 碼：41 碼的十六進位串不是 SHA 固定連結 ──
-FS="$T/fx-s"; mkfx "$FS"; cfg_labels "$FS" '機器A,機器B'
+FS="$T/fx-s"; mkfx "$FS"; cfg_labels "$FS"
 setbody "$FS" "$DEMO
 ## 錨點
 - [x](https://github.com/example-org/app-one/blob/${SHA}9/a.sh)"
 run_main "$FS"
 want_main '41 碼 ⇒ 錨點沒有 SHA 固定連結、rc=1' "$([ "$RC" = 1 ] && has '錨點沒有 SHA 固定連結'; echo $?)"
 
-# ── 給了票號只查那幾張（標籤、格 5、格 7、格 9、錨點都只查那幾張） ──
-FN="$T/fx-n"; mkfx "$FN"; cfg_labels "$FN" '機器A,機器B'
+# ── 給了票號只查那幾張（標籤、格 6、格 9、錨點都只查那幾張） ──
+FN="$T/fx-n"; mkfx "$FN"; cfg_labels "$FN"
 printf '4\topen\towner-a\t[實作] 丁\t改善,P2-一般\n' >> "$FN/issues"     # 缺驗證 ⇒ 格 1 紅
-printf '4\t\t\n' >> "$FN/closers"; printf '%s\n \n' '[實作] 丁' > "$FN/view-4"   # 內文是空的 ⇒ 錨點、格 9 紅
+printf '4\t\n' >> "$FN/bodies"   # 內文是空的 ⇒ 錨點、格 9 紅
 run_nums() { local d="$1"; shift; env PATH="$T/bin:$PATH" FX="$d" bash "$TTC_SCRIPT" example-org/app-one "$@" > "$T/out" 2>&1; RC=$?; }
 run_nums "$FN"
 want_main '⬛ 不給票號 ⇒ 整個 repo 查、票 4 紅' "$([ "$RC" = 1 ] && grep -q "${H}4 .*格1" "$T/out"; echo $?)"
-echo '--mark--' >> "$FAKE_LOG"
 run_nums "$FN" 1
 want_main '只給票 1 ⇒ 票 4 不查、rc=0' "$([ "$RC" = 0 ] && ! grep -q "${H}4 " "$T/out" && grep -q "${H}1 .*錨點 SHA 連結" "$T/out"; echo $?)"
-want_main '只給票 1 ⇒ 沒去讀票 4 的留言' "$(! awk '/^--mark--$/{f=1;next} f' "$FAKE_LOG" | grep -q 'issues/4/comments'; echo $?)"
 run_nums "$FN" 4
 want_main '只給票 4 ⇒ 格 1、錨點、格 9 都紅' "$([ "$RC" = 1 ] && grep -q "${H}4 .*格1" "$T/out" && grep -q "${H}4 .*錨點" "$T/out" && grep -q "${H}4 .*格9" "$T/out"; echo $?)"
 run_nums "$FN" 1 9
@@ -579,22 +381,23 @@ want_main '票號不是數字 ⇒ rc=2' "$([ "$RC" = 2 ]; echo $?)"
 run_nums "$FN" 004
 want_main '票號帶前導零（004）⇒ 當成 4 查、不靜默略過' "$([ "$RC" = 1 ] && grep -q "${H}4 .*格1" "$T/out"; echo $?)"
 
-# ── repo 設定的值去頭尾空白、機器標籤逐個去空白、帳號不分大小寫 ──
-FG="$T/fx-g"; mkfx "$FG" ',機器B'
-printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels ' 'Project 所在: 不適用' \
-  '機器標籤名: 機器A, 機器B ' '只檢查誰開的票: Owner-A ' '```' > "$FG/config.md"
+# ── repo 設定的值去頭尾空白、帳號不分大小寫 ──
+FG="$T/fx-g"; mkfx "$FG" ',錯誤'
+printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels ' \
+  '只檢查誰開的票: Owner-A ' '```' > "$FG/config.md"
 run_main "$FG"
-want_main '設定值帶空白、帳號大小寫不同 ⇒ 照查、已關的票掛機器B 格 4 紅' "$([ "$RC" = 1 ] && has '標籤 格4' && ! has '格 3、4、8 不判' && has '別人開的 0 張'; echo $?)"
+want_main '設定值帶空白、帳號大小寫不同 ⇒ 照查、已關的票格 2 紅' "$([ "$RC" = 1 ] && has '標籤 格2' && has '別人開的 0 張'; echo $?)"
 # 有開著的票、卻沒有一張是設定的帳號開的 ⇒ 帳號多半設錯，印 ??（不是全過）
 FH="$T/fx-h"; mkfx "$FH"
-printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels' 'Project 所在: 不適用' \
-  '機器標籤名: 機器A,機器B' '只檢查誰開的票: someone-else' '```' > "$FH/config.md"
+printf '%s\n' '## 機器讀的欄位' '' '```text' '施工狀態記法: labels' \
+  '只檢查誰開的票: someone-else' '```' > "$FH/config.md"
 run_main "$FH"
 want_main '開著的票沒有一張是設定的帳號開的 ⇒ ??' "$(grep -q '^?? .*沒有一張是 someone-else 開的' "$T/out"; echo $?)"
 
 # ── 只讀：整支跑下來沒有任何寫入型呼叫 ──
 want_main '假 gh 沒收到寫入型呼叫' "$(! grep -Eq -- '(^| )(-X|--method)( |$)|issue (edit|create|close|comment)|label (create|edit|delete)' "$FAKE_LOG"; echo $?)"
-want_main '不逐票 issue view（內文已在會關票 PR 的那次 GraphQL 裡）' "$(! grep -q '^issue view' "$FAKE_LOG"; echo $?)"
+want_main '不逐票 issue view（內文已在那次 GraphQL 裡）' "$(! grep -q '^issue view' "$FAKE_LOG"; echo $?)"
+want_main '不讀留言、PR、Project（只服務被移走的格）' "$(! grep -Eq 'comments|pulls|projectItems|closedByPullRequests' "$FAKE_LOG"; echo $?)"
 want_main '假 gh 有被呼叫到（上一條不是空帳本的假綠）' "$([ "$(grep -c . "$FAKE_LOG")" -gt 20 ]; echo $?)"
 
 printf '\n%d 過／%d 失敗（共 %d）\n' "$pass" "$fail" "$((pass+fail))"
